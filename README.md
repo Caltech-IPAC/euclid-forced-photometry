@@ -21,11 +21,10 @@ list and uncertainty assumptions for their own science sample.
 - [03: Forced photometry on Spitzer/IRAC](notebooks/03_irac_forced_photometry.ipynb):
   a 200-arcsec field in EDF-F, IRAC channels 1-4 with a spatially varying
   effective PRF, residuals, and comparisons with the DAWN catalog and unWISE.
-- [04: Forced photometry on your own ground-based image](notebooks/04_ground_based_forced_photometry.ipynb):
-  a template for measuring any ground image with the VIS models as the
-  prior; replace the example SDSS g image with your own science,
-  uncertainty and PSF. Includes WCS and PSF checks against field stars, a
-  comparison with the SDSS catalog, and an injected-sky background test.
+- [04: Forced photometry on an SDSS image](notebooks/04_ground_based_forced_photometry.ipynb):
+  a 200-arcsec SDSS g image as the example ground-based image, fluxes from
+  the VIS models, PSF and WCS checks, and a comparison with the SDSS
+  catalog; swap in your own image in section 1.
 - [05: Multi-band photometry in one call](notebooks/05_one_call.ipynb): a compact
   50-arcsec run measuring Euclid, unWISE and IRAC bands in one call, and the
   resulting catalog.
