@@ -23,14 +23,16 @@ fluxes for SDSS sources ([Lang, Hogg & Schlegel 2016](https://arxiv.org/abs/1410
 
 This package applies that recipe to the Euclid Quick Data Release
 ([Euclid Collaboration: Aussel et al. 2025](https://arxiv.org/abs/2503.15302)).
-The MER catalog ([Euclid Collaboration: Romelli et al. 2025](https://arxiv.org/abs/2503.15305))
-or a list of your own coordinates gives the sources; VIS fixes their profiles;
-the forced bands are Euclid NISP Y, J and H, unWISE W1 and W2, Spitzer/IRAC
-channels 1 to 4, and any ground-based image you supply.
+The sources come from the MER catalog
+([Euclid Collaboration: Romelli et al. 2025](https://arxiv.org/abs/2503.15305)),
+or from a list of coordinates you supply, and their profiles are fitted on
+VIS. Those profiles are then forced onto Euclid NISP Y, J and H, unWISE W1
+and W2, Spitzer/IRAC channels 1 to 4, and any ground-based image you have.
 
-This is an educational analysis package. It provides explicit diagnostics
-and limited validation tests; users must assess the PSF, residuals, source
-list and uncertainty assumptions for their own science sample.
+The package is meant for learning the method and for exploratory analysis.
+It shows its diagnostics and includes a few validation tests, but the PSF,
+the residuals, the source list and the error assumptions still have to be
+checked on your own science sample.
 
 ## Notebooks
 
@@ -78,14 +80,14 @@ components. WISE additionally requires `unwise_psf` and its dependencies;
 IRAC needs nothing extra. Start Jupyter from that environment so the
 notebooks pick up its kernel.
 
-The notebooks locate the repository from their working directory and work
-from either `notebooks/` or `notebooks/supporting_notebooks/`. Inputs are
-fetched from public archives on first use; image data are not bundled with
-this source distribution, except the example SDSS image for notebook 04 in
-`examples/data/ground_based/`. The notebooks, the command line and the
-Python API all cache downloads under `examples/native_data/` (relative to
-the working directory); set `EUCLID_PHOT_DATA_DIR` to use another cache.
-Network access is required when an input is absent.
+No survey data ship with the repository, apart from the example SDSS image
+for notebook 04 in `examples/data/ground_based/`. The first time a notebook
+or a fit needs a Euclid, unWISE or IRAC input it downloads it from the
+public archive and keeps it under `examples/native_data/`, relative to the
+working directory, or under `EUCLID_PHOT_DATA_DIR` if that is set. Later
+runs read from that cache, so only the first run on a field needs network
+access. The notebooks can be started from `notebooks/` or from
+`notebooks/supporting_notebooks/`; they find the repository from there.
 
 ## Running a fit
 
@@ -117,11 +119,11 @@ compared on the VIS pixels and the positions are refined; this follows
 Sérsic trial, and because the tree fits the shapes itself, `free_shapes`
 has no further effect on that path.
 
-The VIS PSF comes from Euclid's PSF products, either sampled on a regular
-grid (`psf_product="grid"`) or at the MER catalog positions (`"catalog"`).
-With `persource_psf=True` each source is rendered with its nearest sample
-inside the joint fit. The images are used on their MER pixel grid without
-resampling.
+The Euclid images are used as delivered, on the MER pixel grid, and the
+VIS PSF comes from Euclid's PSF products, either sampled on a regular grid
+(`psf_product="grid"`) or at the MER catalog positions (`"catalog"`). With
+`persource_psf=True` each source is rendered with its nearest sample inside
+the joint fit.
 
 The source list does not have to be the MER catalog. A list of your own
 coordinates can be given instead, with the profile class chosen for you by
@@ -154,10 +156,10 @@ result = ep.run_forced_photometry(
 catalog = result.to_table()  # adds flux_IRAC1_ujy, flux_err_IRAC1_ujy, ...
 ```
 
-The IRAC mosaics can come from SEIP (the default), DAWN or PBCD, chosen
-with `mosaic_backend`. IRAC errors include a 2% systematic for the
-effective PRF. For the prior band and for every WISE and IRAC band,
-`result.image_set(band)` returns the data, model and residual images.
+The IRAC mosaics come from SEIP by default; DAWN and PBCD mosaics can be
+chosen with `mosaic_backend`. The IRAC PRF is rebuilt for each mosaic from
+the detector PRFs, and the uncertainty of that reconstruction is carried
+into the IRAC errors as a 2% systematic.
 
 ### Measuring your own image
 
@@ -237,45 +239,55 @@ case.
 
 ## Interpreting results
 
-The catalog gives a flux density in microJansky and its error for every
-source in every band, with an AB magnitude where the flux is positive; a
-flux the fit could not constrain is NaN. Two flags summarise the fitting
-conditions: `reliable` is False when the source is near a bright star, on
-masked pixels or at the cutout edge, and `blended` marks a close
-neighbour. The table metadata records the PSF conventions, the uncertainty
-definitions and the error-scale factors.
+A fit returns a result object, and `result.to_table()` turns it into one
+table with a row per source. Each row holds the flux density in
+microJansky and its error in every measured band, with an AB magnitude
+where the flux is positive; a flux the fit could not constrain is NaN.
+Two flags summarise the fitting conditions: `reliable` is False when the
+source is near a bright star, on masked pixels or at the cutout edge, and
+`blended` marks a close neighbour. The table metadata records the PSF
+conventions, the uncertainty definitions and the error-scale factors.
 
-Euclid errors are conditional template errors, optionally scaled using
-empty-position point-source fits. WISE and IRAC use a residual-based scale
-factor, and IRAC errors add a 2% effective-PRF systematic in quadrature.
-None of these treatments captures all blending, morphology, PSF or sky
-uncertainty. The metadata also gives, per band, the AB magnitude of a
-source whose flux equals five times the median error
-(`depth_5sigma_ab`); it summarises the errors and is not a measured
+The errors are those of the flux solve with the shapes held fixed, so
+they describe the pixel noise and not the uncertainty of the model. In the
+Euclid bands, `calibrate_errors=True` scales them by point-source fits at
+empty positions, which measure the real noise of the images. WISE and IRAC
+errors are scaled by the scatter of the residuals instead, and IRAC adds
+its PRF systematic in quadrature. None of these treatments captures all
+of the uncertainty from blending, morphology, PSF or sky. The table
+metadata also gives, per band, the AB magnitude at five times the median
+error (`depth_5sigma_ab`); that is a summary of the errors, not a measured
 detection or completeness limit.
 
-The assumption that every band shares the VIS morphology can fail for
-sources with colour gradients or with emission seen only in the infrared,
-so structured residuals and sensitivity to the neighbouring models need
-to be inspected. Notebook 01 shows a few-percent difference between the
-NISP fluxes and the MER catalog that we left in place rather than tune the
-PSF until the catalogs agree. WISE and IRAC blends also remain sensitive to
-the PSF shape and to the completeness of the source list. The WISE fit adds unWISE
-catalog sources outside the field; the IRAC fit models only the VIS sources
-inside it, so IRAC fluxes within a few arcsec of the edge can absorb light
+The method assumes that every band shares the VIS morphology, which fails
+for sources with colour gradients or with emission seen only in the
+infrared. The residuals show where this happens, so they should be
+inspected; `result.image_set(band)` returns the data, model and residual
+images of the prior band and of every WISE and IRAC band. Notebook 01
+shows a few-percent difference between the NISP fluxes and the MER catalog
+that we left in place rather than tune the PSF until the catalogs agree.
+In the WISE and IRAC bands, where several VIS sources fall inside one PSF,
+the fluxes also depend on the PSF shape and on the completeness of the
+source list. The WISE fit adds unWISE catalog sources outside the field to
+account for their light; the IRAC fit models only the VIS sources inside
+the field, so IRAC fluxes within a few arcsec of the edge can absorb light
 from outside. Request a slightly larger field when the edge matters.
 
-The [Schlafly et al. (2019) unWISE catalog](https://ui.adsabs.harvard.edu/abs/2019ApJS..240...30S) uses
-a different PSF normalization. Notebook 02 transfers our fitted amplitudes
-to that convention for its comparison only; exported fluxes retain their
-fitting convention. Agreement with that catalog is a cross-check, not an
-absolute calibration or proof of individual blended flux accuracy. The same
-holds for the DAWN catalog comparison in notebook 03. W1 and W2 differ in
-bandpass from IRAC1 and IRAC2, so their ratios depend on source colour.
+The catalog comparisons in the notebooks are cross-checks, not
+calibrations. The
+[Schlafly et al. (2019) unWISE catalog](https://ui.adsabs.harvard.edu/abs/2019ApJS..240...30S)
+uses a different PSF normalization, so notebook 02 converts our fitted amplitudes
+to that convention for the comparison only; the exported fluxes keep the
+fitting convention. Agreement with that catalog, or with the DAWN catalog
+in notebook 03, does not make an individual blended flux right. Notebook
+03 also compares IRAC1 and IRAC2 with W1 and W2; those bandpasses differ,
+so the ratio depends on the source colour and is not expected to be one.
 
-Matching-PSF injections test rendering and recovery consistency. They do not
-validate the real PSF, galaxy morphology, blind detection completeness, or
-all uncertainty contributions. The injection notebook states the tested scope.
+The injection-and-recovery notebook plants point sources rendered with the
+fit's own PSF into real backgrounds and measures them again. That checks
+that rendering and recovery agree with each other; it says nothing about
+the real PSF, galaxy morphology, detection completeness or the uncertainty
+terms listed above. The notebook states what it does and does not cover.
 
 ## How the package is organised
 
