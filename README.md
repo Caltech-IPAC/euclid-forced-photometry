@@ -14,7 +14,7 @@ list and uncertainty assumptions for their own science sample.
 - [00: Modeling a galaxy with the Tractor](notebooks/00_how_tractor_works.ipynb): one galaxy,
   with image construction, model parameters and optimization written out.
 - [01: Forced photometry on Euclid NISP with a VIS prior](notebooks/01_nisp_forced_photometry.ipynb):
-  a 200-arcsec field, source models on VIS, forced fluxes in Y, J and H,
+  a 200-arcsec field in EDF-N, source models on VIS, forced fluxes in Y, J and H,
   residuals and catalog checks.
 - [02: Forced photometry on unWISE W1 and W2](notebooks/02_wise_forced_photometry.ipynb):
   the same field on unWISE W1 and W2, with residuals and a catalog cross-check.
