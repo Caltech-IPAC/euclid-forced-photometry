@@ -102,119 +102,25 @@ result = ep.run_forced_photometry(
     269.48, 67.30, 50.0,  # RA, Dec in degrees; box side in arcsec
     prior={"band": "VIS", "objects": "mer", "model_selection": "tree"},
     target_bands={"euclid": ("Y", "J", "H"), "wise": (), "irac": ()},
-    psf_product="grid", persource_psf=True,
-    mask_bright_stars=True, with_flag=True, calibrate_errors=True,
     data_dir=Path("examples/native_data"), n_workers=4,
 )
 catalog = result.to_table()
 catalog.write("photometry.csv", overwrite=True)
 ```
 
-The first three arguments are the field: its centre in degrees and the
-side of the square cutout in arcsec. The keyword arguments, in the order
-shown:
-
-- `prior`: where the source models come from. `"objects": "mer"` takes the
-  sources from the MER catalog. `"model_selection": "prior"` keeps the
-  profile class and shape that MER assigned to each source;
-  `"tree"` compares profile classes on the VIS pixels and refines the
-  positions, following [The Farmer](https://ui.adsabs.harvard.edu/abs/2023ApJS..269...20W)
-  (Weaver et al. 2023) with different selection details and an extra
-  Sérsic trial. The tree fits the shapes itself, so `free_shapes` has no
-  further effect on that path.
-- `target_bands`: the bands to measure, grouped by survey. Leave a group
-  empty to skip it.
-- `psf_product`: which Euclid PSF product supplies the VIS PSF, sampled on a
-  regular grid (`"grid"`) or at the MER catalog positions (`"catalog"`).
-  The Euclid images themselves are used as delivered, on the MER pixel grid.
-- `persource_psf`: render each source with its nearest PSF sample inside the
-  joint fit, rather than one PSF for the whole field.
-- `mask_bright_stars`: exclude the pixels that MER marks as star
-  footprints, halos and spikes (its STARSIGNAL flag) from the fit.
-- `with_flag`: also fetch the MER quality plane and exclude the pixels it
-  marks as bad; off by default because the RMS map already removes most of
-  them.
-- `calibrate_errors`: scale the Euclid errors by point-source fits at
-  empty positions in the same images.
-- `data_dir`: where downloaded inputs are cached.
-- `n_workers`: parallel workers for the downloads, the model selection and
-  the per-band fits; see "Computing cost".
-
-The source list does not have to be the MER catalog. Pass your own
-coordinates with `user_coords`, with the profile class chosen by the tree
-or set explicitly; see
-[notebook 06](notebooks/06_photometry_at_coordinates.ipynb) and
-`help(ep.run_forced_photometry)` for these and the remaining options. With
-the tree, neighbours detected in the same blob are added to the model even
-if they are not in your list; with an explicit profile class the list must
-already contain them.
-
-The same fit is available from the command line as `euclid-phot run`;
-`--wise` and `--irac` add those bands and `--ground-image` adds your own
-image, as described next.
-
-### Adding unWISE and IRAC
-
-unWISE and IRAC bands are requested in the same way as NISP, together or
-instead of it; unWISE needs the `--wise` install. This example measures W1,
-W2 and the four IRAC channels on the EDF-F field of notebook 03:
-
-```python
-result = ep.run_forced_photometry(
-    52.932, -28.088, 200.0,
-    prior={"band": "VIS", "objects": "mer", "model_selection": "tree"},
-    target_bands={"euclid": (), "wise": ("W1", "W2"),
-                  "irac": ("IRAC1", "IRAC2", "IRAC3", "IRAC4")},
-    irac_options={"mosaic_backend": "dawn"},  # or "seip" (default), "pbcd"
-    psf_product="grid", mask_bright_stars=True,
-    data_dir=Path("examples/native_data"), n_workers=4,
-)
-catalog = result.to_table()  # adds flux_IRAC1_ujy, flux_err_IRAC1_ujy, ...
-```
-
-The IRAC mosaics come from SEIP by default; DAWN and PBCD mosaics can be
-chosen with `mosaic_backend`. The IRAC PRF is rebuilt for each mosaic from
-the detector PRFs, and the uncertainty of that reconstruction is carried
-into the IRAC errors as a 2% systematic.
-
-### Measuring your own image
-
-An image from another telescope is described by its science array, a
-1-sigma uncertainty array, a PSF stamp, a celestial WCS and the flux unit
-of one pixel value. The WCS is refined on matched MER stars before the fit.
-
-```python
-from astropy import units as u
-from astropy.wcs import WCS
-from euclid_phot import ground_based as gb
-
-g = gb.make_image(sci, rms, psf, u.nanomaggy, WCS(header), band="g")
-result = ep.run_forced_photometry(
-    265.8432, 64.965, 220.0,          # a field that covers the whole image
-    prior={"band": "VIS", "objects": "mer", "model_selection": "tree"},
-    target_bands={"euclid": ()}, ground_images={"g": g},
-    ground_options={"background_method": "none"},  # or "sep"
-    psf_product="grid", mask_bright_stars=True, n_workers=4,
-)
-catalog = result.to_table()           # adds flux_g_ujy, flux_err_g_ujy, ...
-```
-
-or from the command line:
-
-```bash
-euclid-phot run --ra 265.8432 --dec 64.965 --size 220 --bands "" \
-    --ground-image sci.fits --ground-variance var.fits --ground-psf psf.fits \
-    --ground-unit nanomaggy --ground-band g
-```
-
-Choose the field to cover the whole image, since sources outside it are
-not modelled. If you have no PSF stamp,
-`gb.gaussian_psf(fwhm_arcsec, pixel_scale_arcsec)` (`--ground-seeing` on
-the command line) gives a Gaussian placeholder, and
-`ground_options={"psf_mode": "nearest_star"}` or `"avg_star"` builds the
-PSF from stars in the image instead. The errors on these fluxes are the
-formal ones from your uncertainty array, without the empirical scaling
-applied to the Euclid bands.
+The field comes first, as its centre and the side of the square cutout.
+The `prior` argument says where the source models come from: here the MER
+catalog, with the profile class of each source chosen on the VIS pixels by
+the model-selection tree (`"model_selection": "prior"` keeps the MER
+classification instead). The `target_bands` argument lists the bands to
+measure; unWISE and IRAC bands go in their own groups, and a ground-based
+image is passed separately as `ground_images`. The source list can also be
+your own coordinates, passed as `user_coords`. The remaining options, for
+the PSF, bright-star masks and error calibration, are described in
+`help(ep.run_forced_photometry)` and shown in
+[notebook 05](notebooks/05_one_call.ipynb); notebooks 03, 04 and 06 cover
+IRAC, your own image and supplied coordinates. The same fit is available
+from the command line as `euclid-phot run --help`.
 
 ## Computing cost
 
@@ -269,7 +175,7 @@ they describe the pixel noise and not the uncertainty of the model. In the
 Euclid bands, `calibrate_errors=True` scales them by point-source fits at
 empty positions, which measure the real noise of the images. WISE and IRAC
 errors are scaled by the scatter of the residuals instead, and IRAC adds
-its PRF systematic in quadrature. None of these treatments captures all
+a 2% systematic for its reconstructed PRF in quadrature. None of these treatments captures all
 of the uncertainty from blending, morphology, PSF or sky. The table
 metadata also gives, per band, the AB magnitude at five times the median
 error (`depth_5sigma_ab`); that is a summary of the errors, not a measured
