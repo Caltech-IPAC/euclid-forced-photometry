@@ -55,7 +55,7 @@ def prepare_euclid(image: SmallImage, data_dir: str | Path,
     mer_path = data_dir / f"mer_catalog_{ra:.4f}_{dec:.4f}_{int(round(size))}.fits"
     if mer_path.is_file():
         mer = Table.read(mer_path)
-        print("MER: local cache", mer_path)
+        print("MER: local cache", mer_path.name)
     else:
         print("MER: querying Euclid for the image footprint", flush=True)
         mer = query_mer_catalog(ra, dec, size / 7200)
@@ -63,7 +63,7 @@ def prepare_euclid(image: SmallImage, data_dir: str | Path,
             raise ValueError("No MER sources found in this image footprint")
         mer_path.parent.mkdir(parents=True, exist_ok=True)
         mer.write(mer_path, overwrite=True)
-        print("MER: saved", mer_path)
+        print("MER: saved", mer_path.name)
     # Both functions read their local cache first and fetch missing data.
     vis = fetch_cutout("VIS", ra, dec, size, data_dir=data_dir / "cutouts",
                        with_flag=True)
