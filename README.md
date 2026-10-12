@@ -60,6 +60,43 @@ this source distribution. The notebooks cache them under
 `examples/native_data/`. Set `EUCLID_PHOT_DATA_DIR` to use another cache.
 Network access is required when an input is absent.
 
+## Computing cost
+
+Most of the memory goes to the VIS model selection that starts every
+`run_forced_photometry` call with `"model_selection": "tree"`. Its memory
+grows faster than the field area, and each extra worker adds to it. The
+fits that follow (VIS fluxes, NISP, unWISE, IRAC) need a few GB.
+
+Measured on the field of [notebook 03](notebooks/03_irac_forced_photometry.ipynb)
+(EDF-F, VIS models fitted to unWISE and IRAC) on a Mac Studio with an
+Apple M3 Ultra (28 cores, 96 GB):
+
+| Field | Sources | `n_workers` | Run time | Peak memory |
+|---|---|---|---|---|
+| 200″, VIS models only | 856 | 10 | 1 min | 26 GB |
+| 200″ | 856 | 10 | 6 min | 26 GB |
+| 200″ | 856 | 1 | 10 min | 16 GB |
+| 300″ | 1953 | 10 | 17 min | 77 GB |
+
+Peak memory includes the worker processes. Run time also depends on the
+processor. Notebooks 01 and 02 run the same model selection on 200″ fields
+and were not measured separately; the 50″ examples in notebooks 04 and 05
+are much smaller.
+
+A Jupyter kernel that runs out of memory stops without a traceback. For
+fields larger than about 200″:
+
+- Run the fit as a Python script rather than in a notebook, and put it
+  under `if __name__ == "__main__":`. Model selection starts worker
+  processes, and on macOS each one re-imports the script.
+- Or split the field into tiles of at most 200″, fit each with a margin of
+  at least 20″ on every side, and keep from each tile only the sources
+  inside its unpadded core. Peak memory then stays at the single-tile
+  level, and the margin keeps kept sources away from tile edges.
+
+A field that crosses a MER tile boundary needs separate tile fits in any
+case.
+
 ## One-call API
 
 ```python
