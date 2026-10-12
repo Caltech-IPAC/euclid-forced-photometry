@@ -291,7 +291,11 @@ terms listed above. The notebook states what it does and does not cover.
 
 ## How the package is organised
 
-Every band is measured with the same recipe; only its pixels and PSF differ:
+The source models are decided once, on VIS: the profile class and shape of
+each source come either from the MER catalog or from the model-selection
+tree, with an optional pass that frees the shapes and refines the positions
+(`selection/`, `forced.fit_free_shapes`, `forced.refine_positions`).
+Every other band then runs the same core recipe on those models:
 
 1. build the band's Tractor image: data, inverse variance, PSF, WCS and the
    photometric scale (`tractor_image.make_tractor_image`);
@@ -302,9 +306,25 @@ Every band is measured with the same recipe; only its pixels and PSF differ:
 4. turn the solve's inverse variances into errors, optionally scaled by the
    residual scatter (`forced.flux_inverse_variance`, `forced.chi_inflation`).
 
+Each band adds to that core what its data need:
+
+- **NISP** runs the bare recipe; its errors are then scaled by point-source
+  fits at empty positions (`calibrate.py`).
+- **unWISE** fits a constant sky offset together with the fluxes and adds
+  unWISE catalog sources outside the field, so that the wings of the
+  6-arcsec PSF are modelled; errors are scaled by the residual scatter.
+- **IRAC** uses a box-constrained optimizer and lets each source move by up
+  to one native IRAC pixel before the final flux solve
+  (`forced.fit_bounded_positions`); errors get the residual scaling and the
+  PRF systematic.
+- **A ground-based image** has its WCS refined on matched MER stars first,
+  can have a background subtracted or a constant sky fitted, and takes one
+  linearised recentring step (`forced.gauss_newton_recenter`); errors are
+  the formal ones.
+
 ```
 src/euclid_phot/        the package (import euclid_phot as ep)
-  units.py  tractor_image.py  pixel_psf.py  sources.py  selection.py
+  units.py  tractor_image.py  pixel_psf.py  sources.py  selection/
   forced.py  background.py  scene.py  calibrate.py  pipeline.py  ...
   euclid/  wise/  irac/  ground_based/
 ```
