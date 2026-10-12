@@ -19,6 +19,7 @@ Pipeline order:
     calibrate_result_errors  calibrate.py   (empirical error calibration)
     fit_wise_forced          wise.py
     fit_irac_forced          irac/          (Spitzer/IRAC subpackage)
+    fit_ground               ground_based/  (user-supplied ground image)
 
 Beyond the single-cutout pipeline: ``run_injection_recovery``
 (injection.py) validates the photometry and errors on synthetic sources;
@@ -111,6 +112,7 @@ _LAZY = {
     "config": ("config", None),
     "viz": ("viz", None),
     "irac": ("irac", None),
+    "ground_based": ("ground_based", None),
 }
 
 __all__ = list(_LAZY.keys()) + ["__version__"]
