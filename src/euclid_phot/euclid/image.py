@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 from tractor import Image
+from tractor.psf import PixelizedPSF
 
 from ..pixel_psf import SpatialPixelizedPSF
 from ..tractor_image import (
@@ -107,7 +108,13 @@ def build_tractor_image(cutout, psf_stamp: np.ndarray | None = None,
     elif psf_stamp is None:
         raise ValueError('Supply psf_data for local PSFs or a constant psf_stamp.')
     else:
-        psf = np.asarray(psf_stamp, dtype=np.float32)
+        # Normalise by the full-precision sum, then store as float32.
+        psf_sum = float(np.sum(psf_stamp))
+        if not np.isfinite(psf_sum) or psf_sum <= 0:
+            raise ValueError(
+                f"psf_stamp has non-finite or non-positive sum ({psf_sum}); "
+                "cannot build a PixelizedPSF from it.")
+        psf = PixelizedPSF(np.asarray(psf_stamp, dtype=np.float32) / psf_sum)
 
     return make_tractor_image(
         np.where(np.isfinite(cutout.data), cutout.data, 0.0), invvar,
