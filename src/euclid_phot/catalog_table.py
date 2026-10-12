@@ -150,6 +150,12 @@ def build_catalog(result, *, origin: str | None = None,
             "Fitted amplitudes with unit-sum effective PRF stamps, multiplied "
             "by the IRAC Instrument Handbook core-PRF to infinite-aperture "
             "correction per channel.")
+    ground_results = getattr(result, "ground_results", None) or {}
+    if ground_results:
+        error_origin["/".join(ground_results)] = (
+            "formal Tractor inverse-variance from the supplied ground-image "
+            "uncertainty map; no empirical scaling, blend covariance, PSF or "
+            "calibration error")
     wise_results = getattr(result, "wise_results", None) or {}
     if wise_results:
         tab.meta["wise_psf_normalization"] = {

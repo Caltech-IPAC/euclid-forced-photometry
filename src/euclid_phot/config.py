@@ -5,9 +5,11 @@ Band constants live with their band: ``euclid.config`` (MER), ``wise.config``
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
-DEFAULT_DATA_DIR = Path("examples/data")
+# Download cache shared by every band; the notebooks use the same folder.
+DEFAULT_DATA_DIR = Path(os.environ.get("EUCLID_PHOT_DATA_DIR", "examples/native_data"))
 
 # R_lambda = A_lambda / E(B-V). Euclid: Gordon et al. (2023) MW curve,
 # A_lambda/A_V = 0.678/0.366/0.261/0.160 (Hunt et al. 2025, A&A 697, A9)

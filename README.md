@@ -21,9 +21,11 @@ list and uncertainty assumptions for their own science sample.
 - [03: Forced photometry on Spitzer/IRAC](notebooks/03_irac_forced_photometry.ipynb):
   a 200-arcsec field in EDF-F, IRAC channels 1-4 with a spatially varying
   effective PRF, residuals, and comparisons with the DAWN catalog and unWISE.
-- [04: Forced photometry on a ground-based image](notebooks/04_ground_based_forced_photometry.ipynb):
-  a 200-arcsec SDSS g image, with WCS and PSF checks against field stars,
-  a comparison with the SDSS catalog, and an injected-sky background test.
+- [04: Forced photometry on your own ground-based image](notebooks/04_ground_based_forced_photometry.ipynb):
+  a template for measuring any ground image with the VIS models as the
+  prior; replace the example SDSS g image with your own science,
+  uncertainty and PSF. Includes WCS and PSF checks against field stars, a
+  comparison with the SDSS catalog, and an injected-sky background test.
 - [05: Multi-band photometry in one call](notebooks/05_one_call.ipynb): a compact
   50-arcsec run measuring Euclid, unWISE and IRAC bands in one call, and the
   resulting catalog.
@@ -90,9 +92,15 @@ The notebooks locate the repository from their working directory and work
 from either `notebooks/` or `notebooks/supporting_notebooks/`. Inputs are
 fetched from public archives on first use; image data are not bundled with
 this source distribution, except the example SDSS image for notebook 04 in
-`examples/data/ground_based/`. The notebooks cache the downloads under
-`examples/native_data/`. Set `EUCLID_PHOT_DATA_DIR` to use another cache.
+`examples/data/ground_based/`. The notebooks, the command line and the
+Python API all cache downloads under `examples/native_data/` (relative to
+the working directory); set `EUCLID_PHOT_DATA_DIR` to use another cache.
 Network access is required when an input is absent.
+
+Every push runs a check on GitHub (`.github/workflows/ci.yml`): the install
+script, a lint pass, the public imports and an offline Tractor fit of a
+synthetic image. It does not download survey data; re-run the notebooks
+before merging changes to the fitting code.
 
 ## Computing cost
 
@@ -165,7 +173,8 @@ see [notebook 06](notebooks/06_photometry_at_coordinates.ipynb) and
 `help(ep.run_forced_photometry)`. With the tree, unlisted neighbours detected
 in the same blob are added to the model; with an explicit profile class the
 supplied list must include them. The command-line entry point is
-`euclid-phot run --help`; `--wise` and `--irac` add those bands.
+`euclid-phot run --help`; `--wise` and `--irac` add those bands, and
+`--ground-image` your own image (see "Ground-based images").
 
 ## IRAC
 
@@ -193,27 +202,46 @@ band. See [notebook 03](notebooks/03_irac_forced_photometry.ipynb).
 
 ## Ground-based images
 
-`euclid_phot.ground_based` fits the VIS models to an image you supply: a
-science array, a 1-sigma uncertainty array in the same units, a PSF stamp
-and a celestial WCS. It refines the WCS with matched MER stars, compares
-the PSF stamp with stars in the image, and fits fluxes in nJy with Tractor.
+`euclid_phot.ground_based` measures an image you supply with the VIS models
+as the prior: a science array, its 1-sigma uncertainty, a PSF stamp, a
+celestial WCS and the flux unit of one pixel value. The WCS is first refined
+on matched MER stars, and fluxes are reported in microJansky like every
+other band. In the one-call driver:
 
 ```python
+from astropy import units as u
+from astropy.wcs import WCS
 from euclid_phot import ground_based as gb
 
-inputs = gb.make_image(sci, rms, psf, u.nanomaggy, WCS(header))
-euclid = gb.prepare_euclid(inputs.image, Path("examples/native_data"))
-registration = gb.register_image(inputs.image, euclid.mer)
-image = replace(inputs.image, wcs=registration.wcs)
-vis = gb.fit_vis(euclid, Path("examples/native_data"), n_workers=4)
-fit = gb.fit_ground(image, vis, background_method="none")  # or "sep"
+g = gb.make_image(sci, rms, psf, u.nanomaggy, WCS(header), band="g")
+result = ep.run_forced_photometry(
+    265.8432, 64.965, 220.0,          # a field that covers the whole image
+    prior={"band": "VIS", "objects": "mer", "model_selection": "tree"},
+    target_bands={"euclid": ()}, ground_images={"g": g},
+    ground_options={"background_method": "none"},  # or "sep"
+    psf_product="grid", mask_bright_stars=True, n_workers=4,
+)
+catalog = result.to_table()           # adds flux_g_ujy, flux_err_g_ujy, ...
 ```
 
-Without a PSF stamp, `gb.gaussian_psf(fwhm_arcsec, pixel_scale_arcsec)` gives
-a placeholder; `psf_mode="nearest_star"` or `"avg_star"`, with
-`psf_assessment=gb.assess_psf(image, registration)`, builds the PSF from
-stars in the image instead. See
-[notebook 04](notebooks/04_ground_based_forced_photometry.ipynb).
+or from the command line:
+
+```bash
+euclid-phot run --ra 265.8432 --dec 64.965 --size 220 --bands "" \
+    --ground-image sci.fits --ground-variance var.fits --ground-psf psf.fits \
+    --ground-unit nanomaggy --ground-band g
+```
+
+Choose the field to cover the image; sources outside it are not modelled.
+Without a PSF stamp, `gb.gaussian_psf(fwhm_arcsec, pixel_scale_arcsec)`
+(`--ground-seeing` on the command line) gives a placeholder, and
+`ground_options={"psf_mode": "nearest_star"}` or `"avg_star"` builds the PSF
+from stars in the image. The errors are the formal ones from the supplied
+uncertainty map, without empirical scaling.
+[Notebook 04](notebooks/04_ground_based_forced_photometry.ipynb) runs the
+same fit step by step with WCS and PSF checks. Its SDSS example files can be
+rebuilt from the SDSS archive with `python scripts/make_sdss_example.py`,
+which also makes the same files for another SDSS frame.
 
 ## Interpreting results
 
