@@ -1,8 +1,8 @@
 # Euclid forced photometry
 
 Measure fluxes on Euclid Q1 VIS and NISP images using Tractor source models,
-with optional unWISE W1/W2 and Spitzer/IRAC photometry. VIS constrains the
-source profiles; the lower-resolution fits keep those profiles fixed and
+with optional unWISE W1/W2, Spitzer/IRAC and user-supplied ground-based
+photometry. VIS constrains the source profiles; the lower-resolution fits keep those profiles fixed and
 solve for flux.
 
 This is an educational analysis package. It provides explicit diagnostics
@@ -21,10 +21,13 @@ list and uncertainty assumptions for their own science sample.
 - [03: Forced photometry on Spitzer/IRAC](notebooks/03_irac_forced_photometry.ipynb):
   a 200-arcsec field in EDF-F, IRAC channels 1-4 with a spatially varying
   effective PRF, residuals, and comparisons with the DAWN catalog and unWISE.
-- [04: Multi-band photometry in one call](notebooks/04_one_call.ipynb): a compact
+- [04: Forced photometry on a ground-based image](notebooks/04_ground_based_forced_photometry.ipynb):
+  a 200-arcsec SDSS g image, with WCS and PSF checks against field stars,
+  a comparison with the SDSS catalog, and an injected-sky background test.
+- [05: Multi-band photometry in one call](notebooks/05_one_call.ipynb): a compact
   50-arcsec run measuring Euclid, unWISE and IRAC bands in one call, and the
   resulting catalog.
-- [05: Photometry at supplied coordinates](notebooks/05_photometry_at_coordinates.ipynb):
+- [06: Photometry at supplied coordinates](notebooks/06_photometry_at_coordinates.ipynb):
   photometry at user positions without a MER source list.
 - [Supporting: Model selection](notebooks/supporting_notebooks/model_selection.ipynb):
   the profile trials for one pair of neighbouring sources.
@@ -32,7 +35,7 @@ list and uncertainty assumptions for their own science sample.
   matching-PSF point-source checks on real backgrounds.
 
 Start with 00 to learn the fitting model, 01 to inspect the full workflow,
-or 04 for a short working example.
+or 05 for a short working example.
 
 ## Install and run
 
@@ -56,7 +59,8 @@ activate it with `source .venv/bin/activate` before starting Jupyter.
 The notebooks locate the repository from their working directory and work
 from either `notebooks/` or `notebooks/supporting_notebooks/`. Inputs are
 fetched from public archives on first use; image data are not bundled with
-this source distribution. The notebooks cache them under
+this source distribution, except the example SDSS image for notebook 04 in
+`examples/data/ground_based/`. The notebooks cache the downloads under
 `examples/native_data/`. Set `EUCLID_PHOT_DATA_DIR` to use another cache.
 Network access is required when an input is absent.
 
@@ -80,7 +84,7 @@ Apple M3 Ultra (28 cores, 96 GB):
 
 Peak memory includes the worker processes. Run time also depends on the
 processor. Notebooks 01 and 02 run the same model selection on 200″ fields
-and were not measured separately; the 50″ examples in notebooks 04 and 05
+and were not measured separately; the 50″ examples in notebooks 05 and 06
 are much smaller.
 
 A Jupyter kernel that runs out of memory stops without a traceback. For
@@ -127,7 +131,7 @@ uses its nearest sample inside a joint fit. Images retain their delivered
 MER pixels. A cutout spanning multiple MER tiles needs separate tile fits.
 
 The package also supports supplied coordinates and selected profile classes;
-see [notebook 05](notebooks/05_photometry_at_coordinates.ipynb) and
+see [notebook 06](notebooks/06_photometry_at_coordinates.ipynb) and
 `help(ep.run_forced_photometry)`. With the tree, unlisted neighbours detected
 in the same blob are added to the model; with an explicit profile class the
 supplied list must include them. The command-line entry point is
@@ -156,6 +160,30 @@ detector PRFs and the exposures in the mosaic. `flux_err_IRAC<n>_ujy`
 includes a 2% PRF systematic. `result.image_set(band)` returns the data,
 model and residual images of the prior band and of every WISE and IRAC
 band. See [notebook 03](notebooks/03_irac_forced_photometry.ipynb).
+
+## Ground-based images
+
+`euclid_phot.ground_based` fits the VIS models to an image you supply: a
+science array, a 1-sigma uncertainty array in the same units, a PSF stamp
+and a celestial WCS. It refines the WCS with matched MER stars, compares
+the PSF stamp with stars in the image, and fits fluxes in nJy with Tractor.
+
+```python
+from euclid_phot import ground_based as gb
+
+inputs = gb.make_image(sci, rms, psf, u.nanomaggy, WCS(header))
+euclid = gb.prepare_euclid(inputs.image, Path("examples/native_data"))
+registration = gb.register_image(inputs.image, euclid.mer)
+image = replace(inputs.image, wcs=registration.wcs)
+vis = gb.fit_vis(euclid, Path("examples/native_data"), n_workers=4)
+fit = gb.fit_ground(image, vis, background_method="none")  # or "sep"
+```
+
+Without a PSF stamp, `gb.gaussian_psf(fwhm_arcsec, pixel_scale_arcsec)` gives
+a placeholder; `psf_mode="nearest_star"` or `"avg_star"`, with
+`psf_assessment=gb.assess_psf(image, registration)`, builds the PSF from
+stars in the image instead. See
+[notebook 04](notebooks/04_ground_based_forced_photometry.ipynb).
 
 ## Interpreting results
 
