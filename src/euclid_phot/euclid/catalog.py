@@ -120,7 +120,7 @@ def query_mer_catalog(ra: float, dec: float, half_size_deg: float,
     # IRSA synchronous TAP silently truncates at MAXREC=2000 by default.
     import warnings
 
-    from .netutils import retry
+    from ..netutils import retry
     mer_cat = retry(
         lambda: Irsa.query_tap(adql, maxrec=_MER_QUERY_MAXREC).to_table(),
         what="IRSA TAP MER query")
@@ -133,7 +133,7 @@ def query_mer_catalog(ra: float, dec: float, half_size_deg: float,
         warnings.warn(
             f"MER query returned {len(mer_cat)} rows, the MAXREC cap; the "
             "catalog is likely truncated. Use a smaller cutout or raise "
-            "euclid_phot.catalog._MER_QUERY_MAXREC.",
+            "euclid_phot.euclid.catalog._MER_QUERY_MAXREC.",
             stacklevel=2)
     # Masked point_like_prob fills as ~1e20 and would compare as a star.
     plp = mer_cat["point_like_prob"]

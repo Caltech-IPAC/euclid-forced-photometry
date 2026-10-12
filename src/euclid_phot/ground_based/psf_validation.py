@@ -42,11 +42,11 @@ def _star_stamp(image: SmallImage, x: float, y: float,
     ix, iy = int(round(x)), int(round(y))
     y0, y1 = iy - radius_y, iy + radius_y + 1
     x0, x1 = ix - radius_x, ix + radius_x + 1
-    height, width = image.science_njy.shape
+    height, width = image.science_ujy.shape
     if x0 < 0 or y0 < 0 or x1 > width or y1 > height:
         return None
-    data = np.asarray(image.science_njy[y0:y1, x0:x1], float)
-    ivar = np.asarray(image.invvar_njy[y0:y1, x0:x1], float)
+    data = np.asarray(image.science_ujy[y0:y1, x0:x1], float)
+    ivar = np.asarray(image.invvar_ujy[y0:y1, x0:x1], float)
     yy, xx = np.mgrid[-radius_y:radius_y + 1, -radius_x:radius_x + 1]
     rr = np.hypot(xx - (x - ix), yy - (y - iy))
     radius = min(radius_x, radius_y)
@@ -160,20 +160,21 @@ def average_star_psf(image: SmallImage, stars: Table,
     return _radialize_noisy_wings(np.mean(stamps, axis=0))
 
 
-def assess_supplied_psf(
-    image: SmallImage, matched_stars: Table, *, min_stars: int = 6,
+def assess_psf(
+    image: SmallImage, registration, *, min_stars: int = 6,
     min_snr: float = 30.0, improvement_fraction: float = 0.10,
     spatial_tolerance: float = 0.15, min_fractional_rms: float = 0.02,
     width_tolerance: float = 0.08,
 ) -> PSFAssessment:
     """Validate one PSF stamp with registered, isolated stellar centroids.
 
-    ``matched_stars`` is the ``registration.matches`` table from the WCS
-    step. No reference-catalog photometry enters the PSF construction.
+    ``registration`` is the result of :func:`register_image`; its matched
+    stars are used. No reference-catalog photometry enters the PSF construction.
     The empirical stamp is a median of 75% of usable stars; the remaining
     25% independently score both PSFs. A clear field-dependent width change
     flags that neither single stamp describes the full image.
     """
+    matched_stars = registration.matches
     if min_stars < 4 or min_snr <= 0 or not 0 < improvement_fraction < 1:
         raise ValueError("invalid PSF validation limits")
     if not {"x_detected", "y_detected"} <= set(matched_stars.colnames):

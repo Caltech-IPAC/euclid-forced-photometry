@@ -58,6 +58,7 @@ class Cutout:
 
     @property
     def pixel_scale_arcsec(self) -> float:
+        # MER mosaics are on an axis-aligned square grid.
         return float(abs(self.wcs.pixel_scale_matrix[0, 0]) * 3600.0)
 
 
@@ -92,7 +93,7 @@ def _closest_tile(tiles, target):
 def discover_mer_mosaics(ra: float, dec: float, half_size_deg: float,
                          *, bands=("VIS", "Y", "J", "H"), verbose=False):
     """SIA query returning dict[band][ptype] with closest tile and ``tiles`` list."""
-    from .netutils import retry
+    from ..netutils import retry
     target = SkyCoord(ra=ra, dec=dec, unit="deg")
     search_radius_deg = MER_TILE_HALF_DEG + half_size_deg + SIA_SEARCH_PAD_DEG
     sia_results = retry(
@@ -173,7 +174,7 @@ def _open_mosaic(s3_path: str, mosaic_cache_dir: Path | None):
                 return fits.open(str(local_path), memmap=True), f"local ({fname[:40]})"
             except OSError:
                 pass
-    from .netutils import S3_FSSPEC_KWARGS, retry
+    from ..netutils import S3_FSSPEC_KWARGS, retry
     return (
         retry(lambda: fits.open(f"s3://{s3_path}", use_fsspec=True,
                                 fsspec_kwargs=S3_FSSPEC_KWARGS),
@@ -396,28 +397,3 @@ def fetch_cutout(band: str, ra: float, dec: float, size_arcsec: float,
         _write_mask_fits(flag_cache, flag, wcs, header)
 
     return Cutout(band=band, data=data, rms=rms, wcs=wcs, header=header, flag=flag)
-
-
-# ---------------------------------------------------------------------------
-# Catalog trimming
-# ---------------------------------------------------------------------------
-
-def trim_catalog_to_cutout(mer_cat, wcs: WCS, shape, *, edge_margin_pix: int = 1):
-    """Drop MER rows whose pixel positions fall off the cutout.
-
-    Boundary rows stay in the source list (their light is in the pixels);
-    their own photometry is flagged downstream
-    (:func:`euclid_phot.flags.flag_sources`, column ``edge``).
-
-    Returns
-    -------
-    astropy.table.Table  (possibly shorter than the input)
-    """
-    H, W = shape
-    keep = np.ones(len(mer_cat), dtype=bool)
-    for i, row in enumerate(mer_cat):
-        px, py = wcs.world_to_pixel_values(row["ra"], row["dec"])
-        if not (edge_margin_pix <= px < W - edge_margin_pix
-                and edge_margin_pix <= py < H - edge_margin_pix):
-            keep[i] = False
-    return mer_cat[keep]

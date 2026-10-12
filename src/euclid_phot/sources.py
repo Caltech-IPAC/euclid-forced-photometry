@@ -1,4 +1,9 @@
-"""Build Tractor source models from MER catalog priors.
+"""Tractor source models: build the priors, then clone them for each band.
+
+``build_sources_from_mer`` / ``build_sources_from_coords`` make the prior
+models fitted on VIS. ``clone_sources`` copies them for any target band
+(NISP, unWISE, IRAC, a ground image) with the position and shape kept and
+only a new brightness, so the same light profile is measured everywhere.
 
 Per MER row:
 
@@ -15,11 +20,14 @@ point of 22.5 (1 nMgy = 3.631 microJy), so seeds divide by 3.631.
 """
 from __future__ import annotations
 
+import copy
+
 import numpy as np
 from tractor import DevGalaxy, ExpGalaxy, GalaxyShape, NanoMaggies, PointSource, RaDecPos
 from tractor.sersic import SersicGalaxy, SersicIndex
 
-_UJY_PER_NMGY = 3.631
+from .units import UJY_PER_NMGY
+
 # Tractor's Sersic mixture-of-Gaussians is valid for 0.29 <= n <= 6.3;
 # clip slightly inside to leave LSQR stepping margin.
 SERSIC_N_MIN = 0.4
@@ -98,7 +106,7 @@ def build_sources_from_mer(mer_cat, *, band: str = "VIS",
         flux_seed = _row_value(row, flux_col, 0.0)
         if flux_seed is None or not np.isfinite(flux_seed):
             flux_seed = 0.0
-        brightness = NanoMaggies(**{band: flux_seed / _UJY_PER_NMGY})
+        brightness = NanoMaggies(**{band: flux_seed / UJY_PER_NMGY})
 
         plp = _row_value(row, "point_like_prob", 0.0)
         re  = _row_value(row, "sersic_sersic_vis_radius")
@@ -206,7 +214,7 @@ def build_sources_from_coords(ra, dec, *, band: str = "VIS",
     sources = []
     for i in range(nsrc):
         pos = RaDecPos(ra[i], dec[i])
-        brightness = NanoMaggies(**{band: float(flux[i]) / _UJY_PER_NMGY})
+        brightness = NanoMaggies(**{band: float(flux[i]) / UJY_PER_NMGY})
         if model == "point":
             sources.append(PointSource(pos, brightness))
         elif model in ("sersic", "exp", "dev"):
@@ -231,3 +239,60 @@ def build_sources_from_coords(ra, dec, *, band: str = "VIS",
                 f"model must be 'point', 'sersic', 'exp', or 'dev'; "
                 f"got {model!r}")
     return sources
+
+
+# ---------------------------------------------------------------------------
+# Cloning the prior models for a target band
+# ---------------------------------------------------------------------------
+
+def profile_radius_arcsec(source) -> float:
+    """Effective radius of a source's profile in arcsec; 0 for a point source.
+
+    A composite galaxy takes the larger of its two component radii.
+    """
+    radii = []
+    for name in ("shape", "shapeExp", "shapeDev"):
+        try:
+            radii.append(float(getattr(source, name).re))
+        except (AttributeError, TypeError):
+            pass
+    finite = [value for value in radii if np.isfinite(value) and value > 0]
+    return max(finite, default=0.0)
+
+
+def clone_sources(sources, band: str, *, seed_nmgy=None,
+                  psf_halfsize_pix: int | None = None,
+                  pixel_scale_arcsec: float | None = None,
+                  point: bool = False) -> list:
+    """Copy the prior source models for ``band``, keeping position and shape.
+
+    Each clone gets a new brightness in ``band`` (``seed_nmgy`` per source,
+    default 1 nanomaggy; a flux-only fit is linear, so the seed only starts
+    it). ``point=True`` replaces every model with a point source.
+
+    The render patch: Tractor sizes a galaxy's patch from its own radius, so
+    with a wide PSF (unWISE, IRAC) a compact galaxy's patch would crop the
+    PSF wings. Pass the PSF stamp half-size and the image pixel scale to
+    give each extended clone ``halfsize = psf_half + max(4, 2 re)`` pixels.
+    Otherwise the patch is sized per image.
+    """
+    n = len(sources)
+    seeds = (np.ones(n) if seed_nmgy is None
+             else np.broadcast_to(np.asarray(seed_nmgy, float), (n,)))
+    with_halfsize = psf_halfsize_pix is not None and pixel_scale_arcsec is not None
+    clones = []
+    for src, seed in zip(sources, seeds):
+        brightness = NanoMaggies(**{band: float(seed)})
+        if point or isinstance(src, PointSource):
+            clones.append(PointSource(src.getPosition().copy(), brightness))
+            continue
+        clone = copy.deepcopy(src)
+        clone.brightness = brightness
+        if with_halfsize:
+            re_pix = profile_radius_arcsec(clone) / float(pixel_scale_arcsec)
+            clone.halfsize = int(int(psf_halfsize_pix)
+                                 + max(4, int(np.ceil(2.0 * re_pix))))
+        elif hasattr(clone, "halfsize"):
+            clone.halfsize = None
+        clones.append(clone)
+    return clones

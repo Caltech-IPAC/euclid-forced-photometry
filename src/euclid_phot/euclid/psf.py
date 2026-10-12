@@ -131,7 +131,7 @@ def extract_catalog_psf(band: str, ra: float, dec: float,
     # Byte-range reads: HDU[2] (small stamp catalog) in full, then one
     # hdu.section read of the nearby-stamp bounding box from HDU[1]
     # (~1-2 MB instead of the 200-500 MB file).
-    from .netutils import S3_FSSPEC_KWARGS, retry
+    from ..netutils import S3_FSSPEC_KWARGS, retry
     with retry(lambda: fits.open(f"s3://{s3_path}", use_fsspec=True,
                                  fsspec_kwargs=S3_FSSPEC_KWARGS),
                what=f"S3 open CATALOG-PSF {band}") as hdul:
@@ -278,7 +278,7 @@ def extract_grid_psf(band: str, ra: float, dec: float,
         s3_path = _resolve_grid_psf_s3(band, products, tile_id)
 
     # Same byte-range strategy as extract_catalog_psf.
-    from .netutils import S3_FSSPEC_KWARGS, retry
+    from ..netutils import S3_FSSPEC_KWARGS, retry
     with retry(lambda: fits.open(f"s3://{s3_path}", use_fsspec=True,
                                  fsspec_kwargs=S3_FSSPEC_KWARGS),
                what=f"S3 open GRID-PSF {band}") as hdul:

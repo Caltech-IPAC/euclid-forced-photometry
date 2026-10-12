@@ -1,64 +1,39 @@
 """Forced photometry on NISP Y/J/H bands given VIS-fitted sources.
 
-For each NISP band we build a Tractor ``Image`` with the supplied PSF field,
-clone the VIS-fitted sources keeping positions and shapes, and run flux-only
-optimization. Returns fluxes in microJanskys, aligned 1:1 with the input
-source list.
+For each NISP band: the band's Tractor image (:func:`build_tractor_image`),
+the VIS-fitted sources cloned with positions and shapes kept, and the shared
+flux-only solve of :mod:`euclid_phot.forced`. NISP needs nothing else of its
+own: the MER mosaics share the VIS pixel grid, and errors are calibrated
+afterwards on empty positions (:mod:`euclid_phot.calibrate`). Returns fluxes
+in microJanskys, aligned 1:1 with the input source list.
 """
 from __future__ import annotations
 
-import copy as _copy
-
 import numpy as np
-from tractor import NanoMaggies, Tractor
 
-from .images import _invvar_from_rms, build_tractor_image
-
-_UJY_PER_NMGY = 3.631
-
-
-def _clone_for_band(vis_src, band: str):
-    """Deep-copy a VIS-fitted source and reset its brightness for ``band``.
-
-    Works uniformly for every Tractor source class the model-selection
-    tree can produce.
-    """
-    cloned = _copy.deepcopy(vis_src)
-    cloned.brightness = NanoMaggies(**{band: 1.0})
-    # halfsize is a render-patch size in pixels carried over from the VIS
-    # fit; clear it so each band's image sizes its own render patch.
-    if hasattr(cloned, "halfsize"):
-        cloned.halfsize = None
-    return cloned
+from ..forced import (
+    flux_errors_ujy,
+    flux_inverse_variance,
+    flux_tractor,
+    fluxes_ujy,
+    solve_fluxes,
+)
+from ..sources import clone_sources
+from .image import build_tractor_image
 
 
 def _fit_one_nisp_band(args):
     """Worker for ``fit_nisp_forced``: one band, runnable in a thread."""
     sources, band, cutout, psf_stamp, pixel_mask, psf_data = args
-    if pixel_mask is not None:
-        invvar = np.where(np.asarray(pixel_mask, bool), 0.0,
-                          _invvar_from_rms(cutout.rms, cutout.data))
-        tim = build_tractor_image(cutout, psf_stamp, invvar=invvar, psf_data=psf_data)
-    else:
-        tim = build_tractor_image(cutout, psf_stamp, psf_data=psf_data)
-    band_sources = [_clone_for_band(s, band) for s in sources]
-    for s in band_sources:
-        s.freezeAllBut("brightness")
-    tim.freezeAllParams()
-    tr = Tractor([tim], band_sources)
-    # With only brightness thawed and the sky frozen, R.IV aligns 1:1 with
-    # the sources; the flux error is 1/sqrt(IV).
-    R = tr.optimize_forced_photometry(
-        minsb=0.0, mindlnp=1.0, sky=False, variance=True)
-    flux_ujy = (np.array([s.brightness.getFlux(band) for s in band_sources])
-                * _UJY_PER_NMGY)
-    iv = np.asarray(R.IV, dtype=float) if getattr(R, "IV", None) is not None \
-        else np.zeros(len(band_sources))
-    if iv.shape[0] != len(band_sources):
-        iv = np.zeros(len(band_sources))
-    with np.errstate(divide="ignore", invalid="ignore"):
-        flux_err_ujy = np.where(iv > 0, 1.0 / np.sqrt(iv), np.nan) * _UJY_PER_NMGY
-    return band, {"flux_ujy": flux_ujy, "flux_err_ujy": flux_err_ujy}
+    tim = build_tractor_image(cutout, psf_stamp, psf_data=psf_data,
+                              pixel_mask=pixel_mask)
+    band_sources = clone_sources(sources, band)
+    tractor = flux_tractor(tim, band_sources)
+    R = solve_fluxes(tractor)
+    flux_err_ujy = flux_errors_ujy(
+        flux_inverse_variance(R, tractor, len(band_sources)))
+    return band, {"flux_ujy": fluxes_ujy(band_sources, band),
+                  "flux_err_ujy": flux_err_ujy}
 
 
 def fit_nisp_forced(sources, cutouts: dict, psf_stamps: dict | None = None,

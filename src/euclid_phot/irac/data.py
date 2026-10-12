@@ -28,7 +28,7 @@ from .config import (
     normalize_channel,
 )
 from .mosaic import MosaicCutout, load_mosaic_cutout
-from .netutils import (
+from ..netutils import (
     download_file,
     ensure_https_ca_bundle,
     https_ssl_context,
@@ -175,7 +175,7 @@ def _request_cosmic_dawn_science_cutout(
         with urlopen(f"{SEIP_CUTOUT_URL}?{query}", timeout=180.0) as response:
             return response.read()
 
-    xml = retry(request, attempts=3, delay_seconds=2.0,
+    xml = retry(request, exceptions=(Exception,),
                 what="IRSA Cosmic Dawn cutout request")
     root = ElementTree.fromstring(xml)
     if root.attrib.get("status", "").lower() != "ok":
@@ -430,6 +430,7 @@ def _seip_science_products(ra: float, dec: float, channel: str):
             collection=SEIP_COLLECTION,
             maxrec=10000,
         ),
+        exceptions=(Exception,),
         what="IRSA SEIP discovery",
     )
     suffix = f".IRAC.{channel[-1]}.mosaic.fits"
@@ -472,7 +473,7 @@ def _request_seip_cutouts(ra: float, dec: float, size_arcsec: float):
         with urlopen(f"{SEIP_CUTOUT_URL}?{query}", timeout=180.0) as response:
             return response.read()
 
-    xml = retry(request, attempts=3, delay_seconds=2.0,
+    xml = retry(request, exceptions=(Exception,),
                 what="IRSA SEIP cutout request")
     root = ElementTree.fromstring(xml)
     if root.attrib.get("status", "").lower() != "ok":

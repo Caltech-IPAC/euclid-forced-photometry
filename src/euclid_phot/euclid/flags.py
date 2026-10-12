@@ -317,6 +317,7 @@ def bright_star_pixel_mask(shape, wcs, ra, dec, fluxes_ujy, is_star, *,
     flux = np.atleast_1d(np.asarray(fluxes_ujy, dtype=float))
     is_star = np.atleast_1d(np.asarray(is_star, dtype=bool))
 
+    # MER mosaics are on an axis-aligned square grid.
     pixscale = float(np.abs(wcs.pixel_scale_matrix[0, 0]) * 3600.0)
     bright = is_star & np.isfinite(flux) & (flux > bright_ujy)
     if not bright.any():

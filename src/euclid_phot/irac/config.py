@@ -2,17 +2,14 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from ..config import DEFAULT_DATA_DIR
 
-
-# Same convention as euclid_phot.config: relative to the working directory.
 # run_forced_photometry passes data_dir / "irac" explicitly.
-DEFAULT_DATA_ROOT = Path("examples/data") / "irac"
+DEFAULT_DATA_ROOT = DEFAULT_DATA_DIR / "irac"
 DEFAULT_PBCD_DIR = DEFAULT_DATA_ROOT / "pbcd"
 DEFAULT_COSMIC_DAWN_DIR = DEFAULT_DATA_ROOT / "cosmic_dawn"
 DEFAULT_CALIBRATION_DIR = DEFAULT_DATA_ROOT / "calibration"
 
-UJY_PER_NMGY = 3.631
 IRAC_CHANNELS = tuple(f"IRAC{i}" for i in range(1, 5))
 IRAC_NATIVE_PIXEL_SCALE_ARCSEC = {
     "IRAC1": 1.221,

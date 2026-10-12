@@ -1,7 +1,7 @@
 """Chi^2 decision-tree model selection for Euclid VIS forced photometry.
 
 An opt-in alternative to the MER-column-driven model construction in
-``models.py``, porting the decision tree of The Farmer (Weaver et al. 2023,
+``sources.py``, porting the decision tree of The Farmer (Weaver et al. 2023,
 ApJS 269, 20; Figures 3-4) onto the Tractor machinery used here.
 
 ``sufficient_thresh`` = 1.5 is the paper's chi^2_N bad-fit criterion;
@@ -45,6 +45,8 @@ from tractor.galaxy import (
 )
 from tractor.sersic import SersicGalaxy, SersicIndex
 
+from .units import UJY_PER_NMGY
+
 logger = logging.getLogger(__name__)
 
 
@@ -65,7 +67,7 @@ EUCLID_DEFAULTS = dict(
     max_steps=50,
     dlnp_crit=1e-3,
     # A railed radius leaves a ring residual on large VIS galaxies, so use
-    # the same 20 arcsec guard models.py applies to MER-seeded shapes.
+    # the same 20 arcsec guard sources.py applies to MER-seeded shapes.
     max_re_arcsec=20.0,
     # Every tier evaluated, lowest reduced chi-squared wins; the published
     # first-sufficient shortcut biases faint fluxes low.
@@ -284,7 +286,7 @@ def _build_initial_source(mer_row, model_class, sep_row, pixscale_arcsec,
     flux_uJy = float(mer_row["flux_vis_sersic"])
     if not np.isfinite(flux_uJy) or flux_uJy <= 0:
         flux_uJy = 1.0
-    brightness = NanoMaggies(**{"VIS": flux_uJy / 3.631})
+    brightness = NanoMaggies(**{"VIS": flux_uJy / UJY_PER_NMGY})
 
     if model_class is PointSource:
         return PointSource(pos, brightness)
@@ -468,7 +470,7 @@ class ModelSelector:
         """
         member_psf = None
         if psf_by_member is not None and psf_stamp is None:
-            from .spatial_psf import SpatialPixelizedPSF
+            from .pixel_psf import SpatialPixelizedPSF
             members = list(blob.member_mer_indices)
             member_psf = SpatialPixelizedPSF({
                 'stamps': np.stack([psf_by_member[i] for i in members]),
@@ -933,7 +935,7 @@ class ModelSelector:
                     source_idx=idx,
                     chi2_red=new_seg_chi2,
                     chi2_wide=new_chi2,
-                    flux_ujy=float(new_src.brightness.getFlux("VIS")) * 3.631,
+                    flux_ujy=float(new_src.brightness.getFlux("VIS")) * UJY_PER_NMGY,
                     model_image=tractor_best.getModelImage(0).copy(),
                     residual_image=(tim_blob.getImage()
                                     - tractor_best.getModelImage(0)).copy(),
@@ -976,7 +978,7 @@ class ModelSelector:
     def _record(self, stage, src, idx, chi2_red, tim_blob, mod_full,
                 chi2_wide=float("nan")):
         try:
-            flux_ujy = float(src.brightness.getFlux("VIS")) * 3.631
+            flux_ujy = float(src.brightness.getFlux("VIS")) * UJY_PER_NMGY
         except Exception:
             flux_ujy = float("nan")
         return StageRecord(
@@ -1369,7 +1371,7 @@ def run_model_selection(
             and not getattr(tim_vis.getPsf(), 'is_spatial', False)
             and psf_data.get("stamps") is not None
             and len(psf_data["stamps"]) > 0):
-        from .spatial_psf import SpatialPixelizedPSF
+        from .pixel_psf import SpatialPixelizedPSF
         tim_vis = _make_masked_image(
             tim_vis, np.ones(tim_vis.shape, dtype=bool),
             psf=SpatialPixelizedPSF(psf_data, tim_vis.getWcs()))

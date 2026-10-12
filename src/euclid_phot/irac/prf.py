@@ -19,7 +19,7 @@ from astropy.wcs import WCS
 from scipy.ndimage import map_coordinates
 
 from .config import DEFAULT_CALIBRATION_DIR, normalize_channel
-from .netutils import download_file
+from ..netutils import download_file
 
 
 CRYO_PRF_URL = (

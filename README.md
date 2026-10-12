@@ -37,6 +37,27 @@ list and uncertainty assumptions for their own science sample.
 Start with 00 to learn the fitting model, 01 to inspect the full workflow,
 or 05 for a short working example.
 
+## How the package is organised
+
+Every band is measured with the same recipe; only its pixels and PSF differ:
+
+1. build the band's Tractor image: data, inverse variance, PSF, WCS and the
+   photometric scale (`tractor_image.make_tractor_image`);
+2. copy the VIS source models into the band, positions and shapes kept
+   (`sources.clone_sources`);
+3. freeze everything but the fluxes and solve (`forced.flux_tractor`,
+   `forced.solve_fluxes`);
+4. turn the solve's inverse variances into errors, optionally scaled by the
+   residual scatter (`forced.flux_inverse_variance`, `forced.chi_inflation`).
+
+These shared modules sit at the top of `src/euclid_phot/`, with `units`,
+`pixel_psf`, `background` and `scene`. Each band folder holds only what is
+its own: `euclid/` (MER catalog, cutouts, PSF products, NISP), `wise/`
+(unWISE coadds, PSF, catalog neighbours), `irac/` (Spitzer mosaics and the
+effective PRF) and `ground_based/` (a user's image, its WCS and PSF checks).
+Notebooks 02-04 run the recipe step by step for one band before calling the
+band's one-line fit.
+
 ## Install and run
 
 From the repository directory:
