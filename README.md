@@ -50,9 +50,18 @@ Every band is measured with the same recipe; only its pixels and PSF differ:
 4. turn the solve's inverse variances into errors, optionally scaled by the
    residual scatter (`forced.flux_inverse_variance`, `forced.chi_inflation`).
 
-These shared modules sit at the top of `src/euclid_phot/`, with `units`,
-`pixel_psf`, `background` and `scene`. Each band folder holds only what is
-its own: `euclid/` (MER catalog, cutouts, PSF products, NISP), `wise/`
+```
+src/euclid_phot/        the package (import euclid_phot as ep)
+  units.py  tractor_image.py  pixel_psf.py  sources.py  selection.py
+  forced.py  background.py  scene.py  calibrate.py  pipeline.py  ...
+  euclid/  wise/  irac/  ground_based/
+```
+
+The code is the `euclid_phot` package inside `src/` (the standard Python
+"src layout"), so notebooks and scripts import it by name and cannot pick
+up stray files from the working directory. The shared modules sit at the
+top of the package, with `units`, `pixel_psf`, `background` and `scene`.
+Each band folder holds only what is its own: `euclid/` (MER catalog, cutouts, PSF products, NISP), `wise/`
 (unWISE coadds, PSF, catalog neighbours), `irac/` (Spitzer mosaics and the
 effective PRF) and `ground_based/` (a user's image, its WCS and PSF checks).
 Notebooks 02-04 run the recipe step by step for one band before calling the
