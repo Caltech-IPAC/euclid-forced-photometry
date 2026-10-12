@@ -110,28 +110,44 @@ catalog = result.to_table()
 catalog.write("photometry.csv", overwrite=True)
 ```
 
-The `prior` entry says where the source models come from. With
-`model_selection="prior"` each source takes the profile class and shape that
-the MER catalog assigned to it. With `"tree"` the profile classes are
-compared on the VIS pixels and the positions are refined; this follows
-[The Farmer](https://ui.adsabs.harvard.edu/abs/2023ApJS..269...20W)
-(Weaver et al. 2023) with different selection details and an additional
-Sérsic trial, and because the tree fits the shapes itself, `free_shapes`
-has no further effect on that path.
+The first three arguments are the field: its centre in degrees and the
+side of the square cutout in arcsec. The keyword arguments, in the order
+shown:
 
-The Euclid images are used as delivered, on the MER pixel grid, and the
-VIS PSF comes from Euclid's PSF products, either sampled on a regular grid
-(`psf_product="grid"`) or at the MER catalog positions (`"catalog"`). With
-`persource_psf=True` each source is rendered with its nearest sample inside
-the joint fit.
+- `prior`: where the source models come from. `"objects": "mer"` takes the
+  sources from the MER catalog. `"model_selection": "prior"` keeps the
+  profile class and shape that MER assigned to each source;
+  `"tree"` compares profile classes on the VIS pixels and refines the
+  positions, following [The Farmer](https://ui.adsabs.harvard.edu/abs/2023ApJS..269...20W)
+  (Weaver et al. 2023) with different selection details and an extra
+  Sérsic trial. The tree fits the shapes itself, so `free_shapes` has no
+  further effect on that path.
+- `target_bands`: the bands to measure, grouped by survey. Leave a group
+  empty to skip it.
+- `psf_product`: which Euclid PSF product supplies the VIS PSF, sampled on a
+  regular grid (`"grid"`) or at the MER catalog positions (`"catalog"`).
+  The Euclid images themselves are used as delivered, on the MER pixel grid.
+- `persource_psf`: render each source with its nearest PSF sample inside the
+  joint fit, rather than one PSF for the whole field.
+- `mask_bright_stars`: exclude the pixels that MER marks as star
+  footprints, halos and spikes (its STARSIGNAL flag) from the fit.
+- `with_flag`: also fetch the MER quality plane and exclude the pixels it
+  marks as bad; off by default because the RMS map already removes most of
+  them.
+- `calibrate_errors`: scale the Euclid errors by point-source fits at
+  empty positions in the same images.
+- `data_dir`: where downloaded inputs are cached.
+- `n_workers`: parallel workers for the downloads, the model selection and
+  the per-band fits; see "Computing cost".
 
-The source list does not have to be the MER catalog. A list of your own
-coordinates can be given instead, with the profile class chosen for you by
-the tree or set explicitly; see
+The source list does not have to be the MER catalog. Pass your own
+coordinates with `user_coords`, with the profile class chosen by the tree
+or set explicitly; see
 [notebook 06](notebooks/06_photometry_at_coordinates.ipynb) and
-`help(ep.run_forced_photometry)`. With the tree, neighbours detected in the
-same blob are added to the model even if they are not in your list; with an
-explicit profile class the list must already contain them.
+`help(ep.run_forced_photometry)` for these and the remaining options. With
+the tree, neighbours detected in the same blob are added to the model even
+if they are not in your list; with an explicit profile class the list must
+already contain them.
 
 The same fit is available from the command line as `euclid-phot run`;
 `--wise` and `--irac` add those bands and `--ground-image` adds your own
