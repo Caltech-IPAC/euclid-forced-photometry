@@ -10,7 +10,9 @@ from astropy.io import fits
 from astropy.table import Table
 from astropy import units as u
 
-from .netutils import download_file
+from ..netutils import download_file
+from ..scene import select_isolated_sources
+from ..wise.config import WISE_FWHM_ARCSEC
 
 
 DAWN_PL_CATALOG_URLS = {
@@ -280,10 +282,8 @@ def compare_wise_irac(
     within ``isolation_arcsec`` (default two WISE FWHM), the isolation
     criterion of notebook 02.
     """
-    from ..wise import _WISE_FWHM_ARCSEC, select_isolated_sources
-
     if isolation_arcsec is None:
-        isolation_arcsec = 2.0 * _WISE_FWHM_ARCSEC
+        isolation_arcsec = 2.0 * WISE_FWHM_ARCSEC
 
     pairs = WISE_IRAC_PAIRS if pairs is None else dict(pairs)
     isolated = select_isolated_sources(

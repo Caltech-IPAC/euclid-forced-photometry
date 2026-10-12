@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import matplotlib.pyplot as plt
 import numpy as np
-from astropy import units as u
-from astropy.wcs.utils import proj_plane_pixel_scales
 from scipy.ndimage import map_coordinates
 
-from euclid_phot.viz import ujy_per_unit
+from ..units import flux_err_to_mag_err, flux_to_ab_mag, pixel_area_arcsec2, pixel_scale_arcsec
+from ..viz import ujy_per_unit
 from .psf_validation import reference_star_comparison
 
 
@@ -17,17 +16,11 @@ def _display_scale(data, *, percentile=99.5):
     return max(float(np.percentile(np.abs(finite), percentile)), 1e-9) if len(finite) else 1.0
 
 
-def _pixel_area_arcsec2(wcs):
-    """Projected pixel area for the small celestial cutouts shown here."""
-    return abs(float(np.linalg.det(wcs.pixel_scale_matrix))) * 3600**2
-
-
 def _vis_on_ground(vis_cutout, image):
     """VIS surface brightness on the ground pixel grid, for display only."""
-    vis_sb = (np.asarray(vis_cutout.data, float) *
-              1000.0 * ujy_per_unit(vis_cutout) /
-              _pixel_area_arcsec2(vis_cutout.wcs))
-    yy, xx = np.indices(image.science_njy.shape, dtype=float)
+    vis_sb = (np.asarray(vis_cutout.data, float) * ujy_per_unit(vis_cutout) /
+              pixel_area_arcsec2(vis_cutout.wcs))
+    yy, xx = np.indices(image.science_ujy.shape, dtype=float)
     ra, dec = image.wcs.pixel_to_world_values(xx, yy)
     vis_x, vis_y = vis_cutout.wcs.world_to_pixel_values(ra, dec)
     return map_coordinates(vis_sb, (vis_y, vis_x), order=1,
@@ -37,19 +30,19 @@ def _vis_on_ground(vis_cutout, image):
 def show_inputs(inputs):
     """Science, RMS and normalized PSF with colorbars and angular scale."""
     image = inputs.image
-    valid = image.invvar_njy > 0
-    area = _pixel_area_arcsec2(image.wcs)
-    display = image.science_njy / area
+    valid = image.invvar_ujy > 0
+    area = pixel_area_arcsec2(image.wcs)
+    display = image.science_ujy / area
     rms = np.full(valid.shape, np.nan)
-    rms[valid] = 1 / np.sqrt(image.invvar_njy[valid]) / area
+    rms[valid] = 1 / np.sqrt(image.invvar_ujy[valid]) / area
     scale = inputs.pixel_scale_arcsec
     ny, nx = display.shape
     extent = (0, nx * scale, 0, ny * scale)
     fig, axes = plt.subplots(1, 3, figsize=(14, 4))
     for ax, data, title, label, cmap, lim, im_extent in (
-        (axes[0], display, "Science", "nJy/arcsec²", "gray",
+        (axes[0], display, "Science", "µJy/arcsec²", "gray",
          (-_display_scale(display) / 10, _display_scale(display)), extent),
-        (axes[1], rms, "Uncertainty", "nJy/arcsec²", "viridis",
+        (axes[1], rms, "Uncertainty", "µJy/arcsec²", "viridis",
          (None, None), extent),
         (axes[2], image.psf, "Supplied PSF", "PSF fraction", "magma",
          (None, None), None),
@@ -71,10 +64,10 @@ def show_scene(inputs, euclid):
     image = inputs.image
     vis = euclid.vis_cutout
     scale = inputs.pixel_scale_arcsec
-    ny, nx = image.science_njy.shape
-    area = _pixel_area_arcsec2(image.wcs)
-    ground = (image.science_njy -
-              np.median(image.science_njy[image.invvar_njy > 0])) / area
+    ny, nx = image.science_ujy.shape
+    area = pixel_area_arcsec2(image.wcs)
+    ground = (image.science_ujy -
+              np.median(image.science_ujy[image.invvar_ujy > 0])) / area
     vis_aligned = _vis_on_ground(vis, image)
     vis_aligned -= np.nanmedian(vis_aligned)
     vmax = max(_display_scale(vis_aligned), _display_scale(ground))
@@ -84,7 +77,7 @@ def show_scene(inputs, euclid):
                             vmin=-vmax / 10, vmax=vmax, extent=extent)
     axes[0].set(title="Euclid VIS (aligned)", xlabel="x (arcsec)",
                 ylabel="y (arcsec)")
-    fig.colorbar(artist, ax=axes[0], label="nJy/arcsec²")
+    fig.colorbar(artist, ax=axes[0], label="µJy/arcsec²")
     artist = axes[1].imshow(ground, origin="lower", cmap="gray",
                             vmin=-vmax / 10, vmax=vmax, extent=extent)
     x, y = image.wcs.world_to_pixel_values(np.asarray(euclid.mer["ra"], float),
@@ -94,7 +87,7 @@ def show_scene(inputs, euclid):
                     facecolors="none", edgecolors="tab:cyan", linewidths=0.6)
     axes[1].set(title=f"Ground image; {inside.sum()} MER sources",
                 xlabel="x (arcsec)", ylabel="y (arcsec)")
-    fig.colorbar(artist, ax=axes[1], label="nJy/arcsec²")
+    fig.colorbar(artist, ax=axes[1], label="µJy/arcsec²")
     fig.tight_layout()
     return fig
 
@@ -133,7 +126,7 @@ def show_psf_stars(image, assessment, *, max_stars=None, star_index=None):
         comparisons = comparisons[:max_stars]
     if not comparisons:
         return None
-    scale = float(np.mean(proj_plane_pixel_scales(image.wcs))) * 3600
+    scale = pixel_scale_arcsec(image.wcs)
     fig, axes = plt.subplots(len(comparisons), 3,
                              figsize=(13, 3.1 * len(comparisons)), squeeze=False)
     for (number, star, (observed, template)), row in zip(comparisons, axes):
@@ -170,7 +163,7 @@ def show_psf_stars(image, assessment, *, max_stars=None, star_index=None):
 
 def show_fit_cutouts(fit, vis_cutout, *, size_arcsec=20.0, n_sources=3,
                     object_ids=None, vmin=None, vmax=None):
-    """Show aligned VIS and ground cutouts in nJy/arcsec².
+    """Show aligned VIS and ground cutouts in µJy/arcsec².
 
     ``vmin`` and ``vmax`` set the common VIS/science/model limits; omitted
     limits are chosen separately for each source. Residuals use ±20% of the
@@ -184,20 +177,21 @@ def show_fit_cutouts(fit, vis_cutout, *, size_arcsec=20.0, n_sources=3,
         raise ValueError("vmin must be smaller than vmax")
     catalog = fit.catalog
     image = fit.image
-    scale = float(np.mean(proj_plane_pixel_scales(image.wcs))) * 3600
-    area = _pixel_area_arcsec2(image.wcs)
+    scale = pixel_scale_arcsec(image.wcs)
+    area = pixel_area_arcsec2(image.wcs)
     vis_aligned = _vis_on_ground(vis_cutout, image)
     vis_aligned -= np.nanmedian(vis_aligned)
     half = max(4, int(np.ceil(size_arcsec / (2 * scale))))
     x, y = np.asarray(catalog["x"], float), np.asarray(catalog["y"], float)
-    flux = np.asarray(catalog["flux_njy"], float)
-    error = np.asarray(catalog["fluxerr_njy"], float)
+    band = catalog.meta["BAND"]
+    flux = np.asarray(catalog[f"flux_{band}_ujy"], float)
+    error = np.asarray(catalog[f"flux_err_{band}_ujy"], float)
     with np.errstate(divide="ignore", invalid="ignore"):
         detected = (error > 0) & (flux / error > 5)
     if object_ids is None:
         eligible = np.flatnonzero(np.isfinite(flux) & detected &
-                                 (x > half) & (x < image.science_njy.shape[1] - half) &
-                                 (y > half) & (y < image.science_njy.shape[0] - half))
+                                 (x > half) & (x < image.science_ujy.shape[1] - half) &
+                                 (y > half) & (y < image.science_ujy.shape[0] - half))
         if not len(eligible):
             return None
         rank = eligible[np.argsort(flux[eligible])]
@@ -229,7 +223,7 @@ def show_fit_cutouts(fit, vis_cutout, *, size_arcsec=20.0, n_sources=3,
                              squeeze=False)
     for row, i in zip(axes, chosen):
         xi, yi = int(round(x[i])), int(round(y[i]))
-        ground = cutout(image.science_njy - fit.background, xi, yi) / area
+        ground = cutout(image.science_ujy - fit.background, xi, yi) / area
         model = cutout(fit.model - fit.background, xi, yi) / area
         resid = cutout(fit.residual, xi, yi) / area
         auto_max = _display_scale(ground)
@@ -248,7 +242,7 @@ def show_fit_cutouts(fit, vis_cutout, *, size_arcsec=20.0, n_sources=3,
                                vmin=lo, vmax=hi, extent=extent)
             ax.set_title(title)
             ax.set(xlabel="x offset (arcsec)", ylabel="y offset (arcsec)")
-            fig.colorbar(artist, ax=ax, label="nJy/arcsec²")
+            fig.colorbar(artist, ax=ax, label="µJy/arcsec²")
         row[0].set_ylabel(f"ID {catalog['object_id'][i]}\ny offset (arcsec)")
     fig.tight_layout()
     return fig
@@ -257,21 +251,18 @@ def show_fit_cutouts(fit, vis_cutout, *, size_arcsec=20.0, n_sources=3,
 def show_catalog_comparison(comparison, *, highlight_object_id=None):
     """Compare SDSS matches, with rejected rows behind the accepted points."""
     good = np.asarray(comparison["accepted"], bool)
-    zero_njy = (3631 * u.Jy).to_value(u.nJy)
-    ref = np.asarray(comparison["reference_flux_njy"], float)
-    fit = np.asarray(comparison["forced_flux_njy"], float)
-    ref_err = np.asarray(comparison["reference_fluxerr_njy"], float)
-    fit_err = np.asarray(comparison["forced_fluxerr_njy"], float)
+    ref = np.asarray(comparison["reference_flux_ujy"], float)
+    fit = np.asarray(comparison["forced_flux_ujy"], float)
+    ref_err = np.asarray(comparison["reference_fluxerr_ujy"], float)
+    fit_err = np.asarray(comparison["forced_fluxerr_ujy"], float)
     plottable = np.isfinite(ref) & np.isfinite(fit) & (ref > 0) & (fit > 0)
     if not np.any(plottable):
         return None
     rejected = ~good & plottable
-    ref_mag = np.full(len(comparison), np.nan)
-    fit_mag = np.full(len(comparison), np.nan)
-    ref_mag[plottable] = -2.5 * np.log10(ref[plottable] / zero_njy)
-    fit_mag[plottable] = -2.5 * np.log10(fit[plottable] / zero_njy)
-    ref_mag_err = 2.5 / np.log(10) * ref_err[good] / ref[good]
-    fit_mag_err = 2.5 / np.log(10) * fit_err[good] / fit[good]
+    ref_mag = flux_to_ab_mag(np.where(plottable, ref, np.nan))
+    fit_mag = flux_to_ab_mag(np.where(plottable, fit, np.nan))
+    ref_mag_err = flux_err_to_mag_err(ref[good], ref_err[good])
+    fit_mag_err = flux_err_to_mag_err(fit[good], fit_err[good])
     kind = np.asarray(comparison["source_type"])
     if highlight_object_id is not None:
         object_ids = np.asarray(comparison["euclid_object_id"].data,
@@ -322,14 +313,14 @@ def show_catalog_comparison(comparison, *, highlight_object_id=None):
     return fig
 
 
-def show_background_comparison(no_sky_fit, sep_fit, *, limit_njy_per_pixel=50.0):
+def show_background_comparison(no_sky_fit, sep_fit, *, limit_ujy_per_pixel=0.05):
     """Compare both fitted residuals using one symmetric brightness scale."""
     data = (no_sky_fit.residual, sep_fit.residual)
-    limit = float(limit_njy_per_pixel)
+    limit = float(limit_ujy_per_pixel)
     if not np.isfinite(limit) or limit <= 0:
         raise ValueError("residual display limit must be positive")
     ny, nx = data[0].shape
-    scale = float(np.mean(proj_plane_pixel_scales(no_sky_fit.image.wcs))) * 3600
+    scale = pixel_scale_arcsec(no_sky_fit.image.wcs)
     extent = (0, nx*scale, 0, ny*scale)
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
     for ax, array, title in zip(axes, data,
@@ -337,15 +328,15 @@ def show_background_comparison(no_sky_fit, sep_fit, *, limit_njy_per_pixel=50.0)
         artist = ax.imshow(array, origin="lower", cmap="RdBu_r",
                            vmin=-limit, vmax=limit, extent=extent)
         ax.set(title=title, xlabel="x (arcsec)", ylabel="y (arcsec)")
-        fig.colorbar(artist, ax=ax, label="Residual (nJy/pixel)")
+        fig.colorbar(artist, ax=ax, label="Residual (µJy/pixel)")
     fig.tight_layout()
     return fig
 
 
 def show_sky_injection_test(injected_sky, baseline_fit, no_sky_fit, sep_fit,
-                            *, smooth_sky=None, limit_njy_per_pixel=50.0):
+                            *, smooth_sky=None, limit_ujy_per_pixel=0.05):
     """Compare sky recovery and injected-image fluxes with the original fit."""
-    limit = float(limit_njy_per_pixel)
+    limit = float(limit_ujy_per_pixel)
     if not np.isfinite(limit) or limit <= 0:
         raise ValueError("residual display limit must be positive")
     true_sky = np.asarray(injected_sky, dtype=float)
@@ -357,7 +348,7 @@ def show_sky_injection_test(injected_sky, baseline_fit, no_sky_fit, sep_fit,
             true_sky.shape != recovered_sky.shape):
         raise ValueError("sky and residual maps must have the same shape")
     ny, nx = true_sky.shape
-    scale = float(np.mean(proj_plane_pixel_scales(no_sky_fit.image.wcs))) * 3600
+    scale = pixel_scale_arcsec(no_sky_fit.image.wcs)
     extent = (0, nx*scale, 0, ny*scale)
     sky_lo = min(np.nanpercentile(true_sky, 1),
                  np.nanpercentile(recovered_sky, 1))
@@ -375,7 +366,7 @@ def show_sky_injection_test(injected_sky, baseline_fit, no_sky_fit, sep_fit,
         artist = ax.imshow(array, origin="lower", cmap=cmap,
                            vmin=lo, vmax=hi, extent=extent)
         ax.set(title=title, xlabel="x (arcsec)", ylabel="y (arcsec)")
-        fig.colorbar(artist, ax=ax, label="nJy/pixel")
+        fig.colorbar(artist, ax=ax, label="µJy/pixel")
 
     def rows_by_id(catalog):
         ids = np.asarray(catalog["object_id"].data, dtype=np.int64)
@@ -389,9 +380,9 @@ def show_sky_injection_test(injected_sky, baseline_fit, no_sky_fit, sep_fit,
     ax = axes[1, 2]
     if common:
         indices = [[row[object_id] for object_id in common] for row in rows]
-        fluxes = [np.asarray(catalog["flux_njy"].data, float)[index]
+        fluxes = [np.asarray(catalog[f"flux_{catalog.meta['BAND']}_ujy"].data, float)[index]
                   for catalog, index in zip(catalogs, indices)]
-        errors = [np.asarray(catalog["fluxerr_njy"].data, float)[index]
+        errors = [np.asarray(catalog[f"flux_err_{catalog.meta['BAND']}_ujy"].data, float)[index]
                   for catalog, index in zip(catalogs, indices)]
         inside = [np.asarray(catalog["in_image"].data, bool)[index]
                   for catalog, index in zip(catalogs, indices)]
@@ -400,8 +391,7 @@ def show_sky_injection_test(injected_sky, baseline_fit, no_sky_fit, sep_fit,
             valid &= np.isfinite(flux) & np.isfinite(error) & (flux > 0) & (error > 0)
         valid &= fluxes[0] / errors[0] > 5
         baseline_flux = fluxes[0][valid]
-        zero_njy = (3631 * u.Jy).to_value(u.nJy)
-        baseline_mag = -2.5 * np.log10(baseline_flux / zero_njy)
+        baseline_mag = flux_to_ab_mag(baseline_flux)
         for flux, color, label in (
             (fluxes[1][valid], "tab:orange", "Before subtraction"),
             (fluxes[2][valid], "tab:blue", "After SEP subtraction"),

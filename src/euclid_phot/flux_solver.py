@@ -1,4 +1,4 @@
-"""Accurate linear flux updates for one WISE image with a constant sky."""
+"""A checked linear solve for flux-only fits (optimizer="scaled" in forced.py)."""
 from __future__ import annotations
 
 import numpy as np
@@ -8,12 +8,13 @@ from scipy.sparse.linalg import lsqr
 from tractor.lsqr_optimizer import LsqrOptimizer
 
 
-class WiseFluxOptimizer(LsqrOptimizer):
+class ScaledFluxOptimizer(LsqrOptimizer):
     """Keep Tractor's templates and likelihood, but check the linear solve.
 
     Tractor's default forced-photometry path disables column scaling and
     accepts one LSQR update without checking its stop condition. In dense
-    WISE scenes, this can leave the source amplitudes short of convergence.
+    scenes with a wide PSF (unWISE), this can leave the source amplitudes
+    short of convergence.
     Normalize template columns before solving; use pivoted QR when the dense
     array is modest, otherwise a sparse solve with explicit stopping checks.
     """
@@ -27,18 +28,18 @@ class WiseFluxOptimizer(LsqrOptimizer):
                            chiImages=None, shared_params=False, **kwargs):
         images = tractor.getImages()
         if len(images) != 1 or priors or shared_params or damp:
-            raise ValueError("WISE flux optimizer requires one image, independent fluxes, and no priors or damping")
+            raise ValueError("the scaled flux optimizer requires one image, shared_params=False, and no priors or damping")
         matrix = super().getUpdateDirection(
             tractor, allderivs, damp=0., priors=False, chiImages=chiImages,
             shared_params=False, scale_columns=False, get_A_matrix=True)
         update = np.zeros(len(allderivs), dtype=float)
         if not hasattr(matrix, 'shape') or matrix.shape[1] == 0:
-            raise ValueError("No weighted pixels constrain the WISE fit")
+            raise ValueError("No weighted pixels constrain the flux fit")
         matrix = matrix.astype(np.float64)
         norm = np.sqrt(np.asarray(matrix.power(2).sum(axis=0)).ravel())
         active = norm > 0
         if not active.any():
-            raise ValueError("No weighted pixels constrain the WISE fit")
+            raise ValueError("No weighted pixels constrain the flux fit")
         scaled = matrix[:, active] @ diags(1. / norm[active])
         residual = (chiImages[0] if chiImages is not None
                     else tractor.getChiImage(img=images[0]))
@@ -48,7 +49,7 @@ class WiseFluxOptimizer(LsqrOptimizer):
                 scaled.toarray(), rhs, lapack_driver='gelsy',
                 cond=np.finfo(float).eps * max(scaled.shape))
             if rank < scaled.shape[1]:
-                raise ValueError("WISE source templates are linearly dependent; individual fluxes cannot be separated")
+                raise ValueError("source templates are linearly dependent; individual fluxes cannot be separated")
             method = 'scaled QR'
             iterations = None
         else:
@@ -56,7 +57,7 @@ class WiseFluxOptimizer(LsqrOptimizer):
                           conlim=1e12, iter_lim=max(1000, 10 * scaled.shape[1]))
             answer, stop, iterations = result[:3]
             if stop not in (0, 1, 2, 4, 5):
-                raise RuntimeError(f"WISE linear solve did not converge (LSQR stop={stop})")
+                raise RuntimeError(f"linear flux solve did not converge (LSQR stop={stop})")
             method = 'scaled LSQR'
             rank = None
         step = np.zeros(matrix.shape[1], dtype=float)

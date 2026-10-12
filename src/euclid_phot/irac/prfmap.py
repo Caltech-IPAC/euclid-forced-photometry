@@ -21,8 +21,8 @@ from astropy.table import Table
 from astropy.wcs import WCS
 from scipy.ndimage import map_coordinates, rotate, shift
 from scipy.spatial import cKDTree
-from tractor.psf import PixelizedPSF
-
+from ..pixel_psf import GridPixelizedPSF
+from ..units import pixel_scale_arcsec
 from .config import IRAC_NATIVE_PIXEL_SCALE_ARCSEC, normalize_channel
 from .prf import (
     DetectorPRFLibrary,
@@ -247,10 +247,7 @@ class PRFMapGeneratedGrid:
             f"{sampling_label}; PRF libraries "
             f"{'+'.join(sorted(self.detector_prfs_by_mission))}"
         )
-        mosaic_scale = float(
-            np.sqrt(abs(np.linalg.det(self.output_wcs.pixel_scale_matrix)))
-            * 3600.0
-        )
+        mosaic_scale = pixel_scale_arcsec(self.output_wcs)
         self.grid_spacing_pixels = float(grid_spacing_arcsec) / mosaic_scale
         self.mosaic_pixel_scale_arcsec = mosaic_scale
         self._mosaic_pa = _position_angle_deg(self.output_wcs)
@@ -308,11 +305,7 @@ class PRFMapGeneratedGrid:
             combined += weight * rotated
             total_weight += weight
             frame_count += 1
-            detector_scales.append(float(
-                np.sqrt(abs(np.linalg.det(
-                    exposure.wcs.celestial.pixel_scale_matrix
-                ))) * 3600.0
-            ))
+            detector_scales.append(pixel_scale_arcsec(exposure.wcs.celestial))
         if frame_count == 0:
             raise ValueError(
                 f"no refptg exposure covers PRFMap node ({px:.2f}, {py:.2f})"
@@ -454,10 +447,7 @@ class PRFMapFileGrid:
                 IRAC_NATIVE_PIXEL_SCALE_ARCSEC[self.channel]
                 / float(header["SAMP_NEW"])
             )
-        output_scale = float(
-            np.sqrt(abs(np.linalg.det(self.output_wcs.pixel_scale_matrix)))
-            * 3600.0
-        )
+        output_scale = pixel_scale_arcsec(self.output_wcs)
         if input_scale is not None and not np.isclose(input_scale, output_scale,
                                                        rtol=1.0e-3):
             data = _resample_centered(
@@ -478,53 +468,6 @@ class PRFMapFileGrid:
             self._cache[grid_id] = self._load(grid_id, filename)
         stamp, count = self._cache[grid_id]
         return stamp.copy(), count
-
-
-class PRFMapMosaicPSF(PixelizedPSF):
-    """A Tractor PSF that selects the nearest PRFMap stamp per source."""
-
-    def __init__(self, builder, reference_pixel: tuple[float, float]):
-        self.builder = builder
-        stamp, _ = builder.render(*reference_pixel)
-        super().__init__(stamp)
-
-    def _local(self, px: float, py: float) -> PixelizedPSF:
-        stamp, _ = self.builder.render(float(px), float(py))
-        return PixelizedPSF(stamp)
-
-    def getPointSourcePatch(self, px, py, minval=0.0, modelMask=None,
-                            radius=None, derivs=False, **kwargs):
-        patch = self._local(px, py).getPointSourcePatch(
-            px, py, minval=minval, modelMask=modelMask, radius=radius,
-            derivs=False, **kwargs,
-        )
-        if not derivs or patch is None:
-            return patch
-        epsilon = 0.01
-        patch_dx = (
-            self.getPointSourcePatch(
-                px + epsilon, py, minval=minval, modelMask=modelMask,
-                radius=radius, **kwargs,
-            )
-            - self.getPointSourcePatch(
-                px - epsilon, py, minval=minval, modelMask=modelMask,
-                radius=radius, **kwargs,
-            )
-        ) * (0.5 / epsilon)
-        patch_dy = (
-            self.getPointSourcePatch(
-                px, py + epsilon, minval=minval, modelMask=modelMask,
-                radius=radius, **kwargs,
-            )
-            - self.getPointSourcePatch(
-                px, py - epsilon, minval=minval, modelMask=modelMask,
-                radius=radius, **kwargs,
-            )
-        ) * (0.5 / epsilon)
-        return patch, patch_dx, patch_dy
-
-    def getFourierTransform(self, px, py, radius):
-        return self._local(px, py).getFourierTransform(px, py, radius)
 
 
 def build_prfmap_psf(
@@ -600,5 +543,5 @@ def build_prfmap_psf(
         )
     reference = ((mosaic_cutout.shape[1] - 1) / 2.0,
                  (mosaic_cutout.shape[0] - 1) / 2.0)
-    return (builder, PRFMapMosaicPSF(builder, reference), selected_mission,
+    return (builder, GridPixelizedPSF(builder, reference), selected_mission,
             builder.backend)

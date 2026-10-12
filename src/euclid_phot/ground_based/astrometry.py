@@ -10,9 +10,10 @@ from astropy import units as u
 from astropy.coordinates import SkyCoord
 from astropy.table import Table
 from astropy.wcs import WCS
-from astropy.wcs.utils import fit_wcs_from_points, proj_plane_pixel_scales
+from astropy.wcs.utils import fit_wcs_from_points
 from scipy.spatial import cKDTree
 
+from ..units import pixel_scale_arcsec
 from .image import SmallImage
 
 
@@ -28,7 +29,7 @@ class WCSRegistration:
     median_dy_pixels: float
 
 
-def register_wcs_with_mer_stars(
+def register_image(
     image: SmallImage, mer: Table, *, min_vis_flux_ujy: float = 1.0,
     match_radius_pixels: float = 3.0, min_matches: int = 20,
 ) -> WCSRegistration:
@@ -44,8 +45,8 @@ def register_wcs_with_mer_stars(
     for key in ("ra", "dec", "is_star", "flux_vis_sersic"):
         if key not in mer.colnames:
             raise ValueError(f"MER catalog missing {key}")
-    data = np.ascontiguousarray(image.science_njy, dtype=np.float32)
-    mask = np.ascontiguousarray(image.invvar_njy <= 0)
+    data = np.ascontiguousarray(image.science_ujy, dtype=np.float32)
+    mask = np.ascontiguousarray(image.invvar_ujy <= 0)
     background = sep.Background(data, mask=mask)
     detected = sep.extract(data - background.back(), 8.0,
                            err=background.rms(), mask=mask, minarea=5)
@@ -100,7 +101,7 @@ def register_wcs_with_mer_stars(
     new_x, new_y = corrected.world_to_pixel(reference)
     before = np.hypot(*(xy - predicted_xy[used]).T)
     after = np.hypot(xy[:, 0] - new_x, xy[:, 1] - new_y)
-    pixel_scale = float(np.mean(proj_plane_pixel_scales(image.wcs))) * 3600
+    pixel_scale = pixel_scale_arcsec(image.wcs)
     matches = Table()
     matches["ra"] = reference.ra.deg
     matches["dec"] = reference.dec.deg

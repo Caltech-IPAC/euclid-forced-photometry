@@ -1,8 +1,9 @@
 """One-call driver: ``run_forced_photometry(prior=..., target_bands=...)``.
 
-Composes the per-step functions in catalog / cutouts / psf / images /
-models / selection / fit / nisp / wise / irac; the same step functions are
-exposed individually for stage-by-stage use.
+Composes the per-step functions: Euclid data (``euclid``), the prior
+models (``sources``, ``selection``), the shared forced-photometry recipe
+(``forced``) and the target bands (``euclid.nisp``, ``wise``, ``irac``);
+the same step functions are exposed individually for stage-by-stage use.
 
 ``prior`` describes where positions and shapes come from (``band``,
 ``objects`` = "mer" or "coords", ``model_selection`` = "prior" / "tree" /
@@ -21,22 +22,22 @@ from pathlib import Path
 
 import numpy as np
 
-from .catalog import query_mer_catalog
 from .config import DEFAULT_DATA_DIR
-from .cutouts import discover_mer_mosaics, fetch_cutout, trim_catalog_to_cutout
-from .fit import (
+from .euclid.catalog import query_mer_catalog
+from .euclid.cutouts import discover_mer_mosaics, fetch_cutout
+from .euclid.image import build_tractor_image
+from .euclid.nisp import fit_nisp_forced
+from .euclid.psf import extract_catalog_psf, extract_grid_psf, psf_summary
+from .forced import (
     fit_forced_photometry,
     fit_free_shapes,
+    fluxes_ujy,
     refine_positions,
 )
-from .images import build_tractor_image
-from .models import build_sources_from_coords, build_sources_from_mer
-from .nisp import fit_nisp_forced
-from .psf import extract_catalog_psf, extract_grid_psf, psf_summary
+from .scene import footprint_mask, trim_catalog_to_cutout
 from .selection import run_model_selection, unlisted_sep_detections
+from .sources import build_sources_from_coords, build_sources_from_mer
 from .wise import fetch_unwise_cutouts, fit_wise_forced, get_wise_psf
-
-_UJY_PER_NMGY = 3.631
 
 _VALID_PRIOR_BANDS = {"VIS", "Y", "J", "H"}
 _VALID_OBJECTS = {"mer", "free", "coords"}
@@ -313,16 +314,9 @@ def _drop_coords_outside_cutout(parsed: dict, wcs, shape, *, margin_pix: int = 1
     filtered to the survivors; scalar entries (e.g. a single ``model`` string,
     or a broadcast single flux/shape value) are preserved unchanged.
     """
-    H, W = shape
     ra = np.atleast_1d(np.asarray(parsed["ra"], float))
-    dec = np.atleast_1d(np.asarray(parsed["dec"], float))
     n = len(ra)
-    keep = np.ones(n, dtype=bool)
-    for i in range(n):
-        px, py = wcs.world_to_pixel_values(ra[i], dec[i])
-        if not (margin_pix <= px < W - margin_pix
-                and margin_pix <= py < H - margin_pix):
-            keep[i] = False
+    keep = footprint_mask(ra, parsed["dec"], wcs, shape, margin_pix=-margin_pix)
     n_dropped = int((~keep).sum())
     if n_dropped == 0:
         return parsed, 0
@@ -530,7 +524,7 @@ def run_forced_photometry(
         Fetches the FLG planes automatically and works for every
         source-list mode; the covered stars are themselves not measurable
         and carry the ``bright_star`` flag. A dict of
-        :func:`euclid_phot.flags.bright_star_pixel_mask` keywords selects
+        :func:`euclid_phot.euclid.flags.bright_star_pixel_mask` keywords selects
         the geometric fallback for data without the FLG plane. The applied
         mask is stored as ``result.prior_pixel_mask``.
     persource_psf : bool
@@ -765,7 +759,6 @@ def run_forced_photometry(
         print(f"[5/7] build Tractor image + source models on {prior_band}")
     psf_fwhm_prior = float(np.median(result.psf_data[prior_band]["fwhm"]))
 
-    prior_invvar = None
     if mask_bright_stars is True:
         flag_plane = getattr(cutouts[prior_band], "flag", None)
         if flag_plane is None:
@@ -776,12 +769,8 @@ def run_forced_photometry(
                 "pixel mask. Pass a dict of bright_star_pixel_mask keywords "
                 "to use the geometric fallback instead.", stacklevel=2)
         else:
-            from .flags import starsignal_pixel_mask
-            from .images import _invvar_from_rms
+            from .euclid.flags import starsignal_pixel_mask
             star_mask = starsignal_pixel_mask(cutouts[prior_band])
-            base_iv = _invvar_from_rms(cutouts[prior_band].rms,
-                                       cutouts[prior_band].data)
-            prior_invvar = np.where(star_mask, 0.0, base_iv)
             result.prior_pixel_mask = star_mask
             if verbose:
                 pct = 100.0 * star_mask.mean()
@@ -799,8 +788,7 @@ def run_forced_photometry(
                 "skipping the bright-star pixel mask for this "
                 "user-coordinates run.", stacklevel=2)
         else:
-            from .flags import bright_star_pixel_mask, probable_bright_stars
-            from .images import _invvar_from_rms
+            from .euclid.flags import bright_star_pixel_mask, probable_bright_stars
             mer = result.mer_cat
             # The classifier abstains on the brightest stars;
             # probable_bright_stars recovers them via the PSF/Sersic ratio.
@@ -823,9 +811,6 @@ def run_forced_photometry(
                 cutouts[prior_band].shape, cutouts[prior_band].wcs,
                 np.asarray(mer["ra"], float), np.asarray(mer["dec"], float),
                 star_flux, star_flag, **mask_kwargs)
-            base_iv = _invvar_from_rms(cutouts[prior_band].rms,
-                                       cutouts[prior_band].data)
-            prior_invvar = np.where(star_mask, 0.0, base_iv)
             result.prior_pixel_mask = star_mask
             if verbose:
                 pct = 100.0 * star_mask.mean()
@@ -844,7 +829,7 @@ def run_forced_photometry(
 
     tim_prior = build_tractor_image(
         cutouts[prior_band], result.psf_stamps.get(prior_band),
-        invvar=prior_invvar,
+        pixel_mask=result.prior_pixel_mask,
         psf_data=result.psf_data[prior_band] if persource_psf else None)
 
     n_report = None
@@ -962,18 +947,14 @@ def run_forced_photometry(
     result.flux_quality = fit_quality
 
     if persource_psf:
-        prior_ujy = np.array([
-            s.brightness.getFlux(prior_band) for s in result.sources
-        ]) * _UJY_PER_NMGY
+        prior_ujy = fluxes_ujy(result.sources, prior_band)
         with np.errstate(invalid="ignore"):
             bad = prior_ujy < 0
             ref_ok = np.isfinite(initial_flux) & (initial_flux > 0)
             bad |= ref_ok & (np.abs(prior_ujy) > 100.0 * initial_flux)
         result.flux_quality = result.flux_quality & ~bad
 
-    prior_ujy = np.array([
-        s.brightness.getFlux(prior_band) for s in result.sources
-    ]) * _UJY_PER_NMGY
+    prior_ujy = fluxes_ujy(result.sources, prior_band)
     prior_ujy = np.where(result.flux_quality, prior_ujy, np.nan)
     result.fluxes_ujy[prior_band] = prior_ujy
     result.flux_errs_ujy[prior_band] = np.where(
@@ -1041,7 +1022,7 @@ def run_forced_photometry(
 
     irac_targets = tuple(target_bands["irac"])
     if irac_targets:
-        from .irac.pipeline import fit_irac_forced
+        from .irac.fit import fit_irac_forced
         if verbose:
             print(f"[+] IRAC forced phot: {', '.join(irac_targets)}")
         options = {"mosaic_backend": "seip", **(irac_options or {})}

@@ -136,9 +136,9 @@ def inject_sources(cutout, psf, truth, *,
 
     from tractor import Tractor
 
-    from .images import build_tractor_image
-    from .models import build_sources_from_mer
-    from .psf import psf_summary
+    from .euclid.image import build_tractor_image
+    from .euclid.psf import psf_summary
+    from .sources import build_sources_from_mer
 
     flux_col = flux_col or _FLUX_COL[band]
     if flux_col not in truth.colnames:
@@ -224,9 +224,9 @@ def run_injection_recovery(*,
 
     from astropy.table import Table, vstack
 
-    from .cutouts import fetch_cutout
+    from .euclid.cutouts import fetch_cutout
+    from .euclid.psf import extract_catalog_psf, extract_grid_psf
     from .pipeline import run_forced_photometry
-    from .psf import extract_catalog_psf, extract_grid_psf
 
     extractors = {"grid": extract_grid_psf, "catalog": extract_catalog_psf}
     if injection_psf_product not in extractors:
@@ -249,7 +249,7 @@ def run_injection_recovery(*,
     if mer_cache.exists():
         mer = Table.read(mer_cache)
     else:
-        from .catalog import query_mer_catalog
+        from .euclid.catalog import query_mer_catalog
         mer = query_mer_catalog(target_ra, target_dec,
                                 cutout_size_arcsec / 2.0 / 3600.0)
 

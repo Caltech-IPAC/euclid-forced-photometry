@@ -11,6 +11,9 @@ from astropy.io import fits
 from astropy.nddata import Cutout2D
 from astropy.wcs import WCS
 
+from ..units import pixel_area_sr
+
+
 @dataclass
 class MosaicCutout:
     """Aligned science-mosaic arrays in microJy per mosaic pixel."""
@@ -34,11 +37,6 @@ class MosaicCutout:
     @property
     def shape(self) -> tuple[int, int]:
         return self.data_ujy.shape
-
-
-def pixel_area_sr(wcs: WCS) -> float:
-    """Projected solid angle of one image pixel in steradians."""
-    return abs(float(np.linalg.det(wcs.pixel_scale_matrix))) * (np.pi / 180.0) ** 2
 
 
 def load_mosaic_cutout(
