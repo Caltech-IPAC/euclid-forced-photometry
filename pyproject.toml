@@ -50,9 +50,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/NimaChartab/euclid-forced-photometry"
-Documentation = "https://github.com/NimaChartab/euclid-forced-photometry#readme"
-Issues = "https://github.com/NimaChartab/euclid-forced-photometry/issues"
+Homepage = "https://github.com/Caltech-IPAC/euclid-forced-photometry"
+Documentation = "https://github.com/Caltech-IPAC/euclid-forced-photometry#readme"
+Issues = "https://github.com/Caltech-IPAC/euclid-forced-photometry/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
