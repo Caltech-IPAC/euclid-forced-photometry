@@ -174,7 +174,11 @@ else
     # wheel must be present (Python 3.12+ venvs no longer ship setuptools).
     # cython + numpy (a euclid_phot dep, already installed) build _mp_fourier.
     "$PY" -m pip install setuptools wheel cython
-    "$PY" -m pip install --no-build-isolation \
+    # Tractor's SWIG wrapper for _mp_fourier still names two Python 2 C-API
+    # functions; recent clang rejects the implicit declarations and the
+    # module would fail to load anyway. Map them to their Python 3 names.
+    CFLAGS="${CFLAGS:-} -DPyString_Check=PyUnicode_Check -DPyInt_Check=PyLong_Check" \
+        "$PY" -m pip install --no-build-isolation \
         "git+https://github.com/dstndstn/tractor.git"
 fi
 
