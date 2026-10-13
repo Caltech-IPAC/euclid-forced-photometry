@@ -1,5 +1,6 @@
 # Downloaded inputs and generated catalogs
 examples/native_data/
+examples/data/
 examples/output/
 data/
 outputs/
