@@ -14,6 +14,8 @@ import time
 import urllib.request
 from pathlib import Path
 
+import numpy as np
+
 # OSError covers socket/timeout errors (s3fs, urllib); pyvo/astroquery raise
 # requests exceptions, which subclass OSError in requests>=2.
 _DEFAULT_EXCEPTIONS = (OSError, TimeoutError)
@@ -94,3 +96,41 @@ def download_file(url: str, path: str | Path, *, force: bool = False,
         if temporary.exists():
             temporary.unlink()
     return path
+
+
+_BITPIX_DTYPE = {8: "u1", 16: ">i2", 32: ">i4", 64: ">i8", -32: ">f4", -64: ">f8"}
+
+
+def read_s3_image_section(hdu, slices, s3_path):
+    """Pixels of ``hdu[slices]``; for an S3-hosted mosaic, one concurrent
+    byte-range request per row.
+
+    A cutout of N rows is N short strips spaced one mosaic row apart.
+    Reading them through the file object pulls the whole span between
+    them, and sequential requests pay the S3 round trip N times. Fetching
+    the strips together with ``cat_ranges`` transfers only the cutout and
+    overlaps the requests. Scaled, blanked or compressed images fall back
+    to the ordinary section read.
+    """
+    header = hdu.header
+    scaled = (header.get("BSCALE", 1) != 1 or header.get("BZERO", 0) != 0
+              or "BLANK" in header)
+    dtype = _BITPIX_DTYPE.get(header.get("BITPIX"))
+    offset = getattr(hdu, "_data_offset", None)
+    if (s3_path is None or scaled or dtype is None or offset is None
+            or header.get("NAXIS") != 2 or hdu.is_image is False
+            or type(hdu).__name__ == "CompImageHDU"):
+        return np.asarray(hdu.section[slices]).copy()
+
+    import s3fs
+    rows, cols = (range(*sl.indices(n)) for sl, n in zip(slices, hdu.shape))
+    nx = int(header["NAXIS1"])
+    bpp = np.dtype(dtype).itemsize
+    starts = [offset + (r * nx + cols.start) * bpp for r in rows]
+    ends = [start + len(cols) * bpp for start in starts]
+    fs = s3fs.S3FileSystem(**S3_FSSPEC_KWARGS)
+    chunks = retry(lambda: fs.cat_ranges([s3_path] * len(starts), starts, ends,
+                                         on_error="raise"),
+                   what=f"S3 cutout rows {s3_path.split('/')[-1][:40]}")
+    data = np.frombuffer(b"".join(chunks), dtype=dtype)
+    return data.reshape(len(rows), len(cols)).astype(data.dtype.newbyteorder("="))

@@ -22,68 +22,72 @@ def plot_workflow(ax=None, *, save_path=None):
     from matplotlib.patches import FancyArrowPatch, FancyBboxPatch
 
     if ax is None:
-        _, ax = plt.subplots(figsize=(14, 6.2))
-    ax.set_xlim(0, 14); ax.set_ylim(0, 6.2); ax.axis("off")
+        _, ax = plt.subplots(figsize=(14, 5.6))
+    ax.set_xlim(0, 14); ax.set_ylim(0, 5.6); ax.axis("off")
 
     def box(x, y, w, h, title, body, fc):
         ax.add_patch(FancyBboxPatch(
             (x, y), w, h, boxstyle="round,pad=0.05,rounding_size=0.14",
             linewidth=1.1, edgecolor="0.25", facecolor=fc))
-        ax.text(x + w / 2, y + h - 0.26, title, ha="center", va="center",
+        ax.text(x + w / 2, y + h - 0.28, title, ha="center", va="center",
                 fontsize=11, fontweight="bold")
         if body:
-            ax.text(x + w / 2, y + (h - 0.42) / 2, body, ha="center",
+            ax.text(x + w / 2, y + (h - 0.45) / 2 + 0.05 * h, body, ha="center",
                     va="center", fontsize=9.6, linespacing=1.45)
 
     def arrow(x0, y0, x1, y1):
         ax.add_patch(FancyArrowPatch(
-            (x0, y0), (x1, y1), arrowstyle="-|>", mutation_scale=13,
-            linewidth=1.2, color="0.3", shrinkA=2, shrinkB=2))
+            (x0, y0), (x1, y1), arrowstyle="-|>", mutation_scale=14,
+            linewidth=1.3, color="0.3", shrinkA=0, shrinkB=0))
 
     def header(xc, text):
-        ax.text(xc, 5.85, text, ha="center", va="center", fontsize=11.5,
+        ax.text(xc, 5.3, text, ha="center", va="center", fontsize=11.5,
                 color="0.35", fontweight="bold")
 
     c_in, c_mod, c_fit = "#dce7f3", "#e6e0f0", "#eef0f2"
     c_tgt, c_out = "#e0eedd", "#f7ecd5"
 
+    # Main chain: four boxes sharing one vertical centre, joined by
+    # straight horizontal arrows.
+    yc, h = 2.55, 2.6
+    y0 = yc - h / 2
+
     header(1.45, "Archive inputs")
-    box(0.25, 3.95, 2.4, 1.25, "MER catalog",
-        "positions, Sersic shapes\n(IRSA TAP)", c_in)
-    box(0.25, 2.30, 2.4, 1.25, "Image cutouts",
-        "VIS + Y/J/H science + RMS\n(IRSA/S3)", c_in)
-    box(0.25, 0.65, 2.4, 1.25, "PSF stamps",
-        "CATALOG-PSF at sources;\nGRID-PSF on a 12\" grid", c_in)
+    box(0.25, 3.55, 2.4, 1.15, "MER catalog",
+        "positions, Sersic shapes", c_in)
+    box(0.25, 1.98, 2.4, 1.15, "Image cutouts",
+        "VIS and target bands,\nscience + RMS", c_in)
+    box(0.25, 0.40, 2.4, 1.15, "PSF models",
+        "per band, at or near\neach source", c_in)
 
     header(4.35, "Source models")
-    box(3.25, 1.85, 2.2, 2.5, "Two choices",
-        "MER positions\n\n"
-        "catalog models or\nVIS model-selection tree", c_mod)
+    box(3.25, y0, 2.2, h, "Model selection",
+        "MER positions;\nMER catalog models or\nVIS model-selection tree", c_mod)
 
-    header(7.15, "Prior fit (VIS)")
-    box(6.05, 1.55, 2.2, 3.0, "VIS fit",
-        "profiles and positions\nfrom the selected mode;\n"
-        "joint source fluxes;\nmasked pixels excluded", c_fit)
+    header(7.15, "Prior fit")
+    box(6.05, y0, 2.2, h, "VIS fit",
+        "positions and profiles\nfrom the selected models;\n"
+        "all fluxes fitted jointly;\nmasked pixels excluded", c_fit)
 
     header(9.95, "Forced photometry")
-    box(8.85, 3.20, 2.2, 1.35, "NISP Y/J/H",
-        "shapes frozen at VIS;\nflux per band", c_tgt)
-    box(8.85, 1.55, 2.2, 1.35, "unWISE W1/W2",
-        "shapes frozen at VIS;\nflux + joint sky offset", c_tgt)
+    box(8.85, y0, 2.2, h, "Target bands",
+        "VIS positions and shapes\nheld fixed;\nonly fluxes fitted\n"
+        "(plus sky where needed)", c_tgt)
 
-    header(12.4, "Catalog")
-    box(11.65, 1.55, 2.1, 3.0, "Per-object table",
-        "fluxes + AB magnitudes;\nestimated errors;\n"
-        "foreground corrections;\nquality + blend flags;\n"
-        "error summaries", c_out)
+    header(12.6, "Catalog")
+    box(11.65, y0, 2.1, h, "Per-object table",
+        "fluxes, AB magnitudes,\nestimated errors,\n"
+        "quality and blend flags", c_out)
 
-    for y in (4.55, 2.90, 1.25):
-        arrow(2.65, y, 3.25, 3.10)
-    arrow(5.45, 3.10, 6.05, 3.85)
-    arrow(8.25, 2.55, 8.85, 3.70)
-    arrow(8.25, 2.20, 8.85, 2.20)
-    arrow(11.05, 3.90, 11.65, 3.40)
-    arrow(11.05, 2.20, 11.65, 2.60)
+    # Inputs join a vertical spine, which feeds the chain.
+    xs = 2.95
+    for yb in (4.125, 2.555, 0.975):
+        ax.plot([2.65, xs], [yb, yb], color="0.3", linewidth=1.3)
+    ax.plot([xs, xs], [0.975, 4.125], color="0.3", linewidth=1.3)
+    arrow(xs, yc, 3.25, yc)
+    arrow(5.45, yc, 6.05, yc)
+    arrow(8.25, yc, 8.85, yc)
+    arrow(11.05, yc, 11.65, yc)
     if save_path is not None:
         ax.figure.savefig(save_path, dpi=130, bbox_inches="tight")
     return ax
