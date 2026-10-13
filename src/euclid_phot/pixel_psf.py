@@ -1,8 +1,12 @@
-"""Nearest measured PSF at each source position, in one Tractor scene.
+"""PSFs that vary across the image: the nearest stamp at each source.
 
-The supplied stamps are samples of the instrumental PSF on the mosaic.
-Sources keep their own profiles; this class selects the convolution kernel
-at each rendered centroid. All sources still contribute to the joint fit.
+Sources keep their own profiles; these classes select the convolution
+kernel at each rendered centroid, and all sources still enter one joint fit.
+
+- :class:`SpatialPixelizedPSF`: measured PSF samples at sky positions
+  (Euclid MER CATALOG-PSF / GRID-PSF).
+- :class:`GridPixelizedPSF`: stamps rendered on demand by a grid builder
+  at pixel positions (the reconstructed IRAC effective PRF).
 """
 from __future__ import annotations
 
@@ -120,3 +124,55 @@ class SpatialPixelizedPSF(BaseParams):
 
     def getFourierTransform(self, px, py, radius):
         return self.constantPsfAt(px, py).getFourierTransform(px, py, radius)
+
+
+class GridPixelizedPSF(PixelizedPSF):
+    """A Tractor PSF whose stamp at (x, y) comes from ``builder.render``.
+
+    ``builder.render(px, py)`` returns ``(unit-sum stamp, n_frames)``. The
+    stamp at ``reference_pixel`` is the nominal PSF. Position derivatives
+    are finite differences, so centroids can be fitted.
+    """
+
+    def __init__(self, builder, reference_pixel: tuple[float, float]):
+        self.builder = builder
+        stamp, _ = builder.render(*reference_pixel)
+        super().__init__(stamp)
+
+    def _local(self, px: float, py: float) -> PixelizedPSF:
+        stamp, _ = self.builder.render(float(px), float(py))
+        return PixelizedPSF(stamp)
+
+    def getPointSourcePatch(self, px, py, minval=0.0, modelMask=None,
+                            radius=None, derivs=False, **kwargs):
+        patch = self._local(px, py).getPointSourcePatch(
+            px, py, minval=minval, modelMask=modelMask, radius=radius,
+            derivs=False, **kwargs,
+        )
+        if not derivs or patch is None:
+            return patch
+        epsilon = 0.01
+        patch_dx = (
+            self.getPointSourcePatch(
+                px + epsilon, py, minval=minval, modelMask=modelMask,
+                radius=radius, **kwargs,
+            )
+            - self.getPointSourcePatch(
+                px - epsilon, py, minval=minval, modelMask=modelMask,
+                radius=radius, **kwargs,
+            )
+        ) * (0.5 / epsilon)
+        patch_dy = (
+            self.getPointSourcePatch(
+                px, py + epsilon, minval=minval, modelMask=modelMask,
+                radius=radius, **kwargs,
+            )
+            - self.getPointSourcePatch(
+                px, py - epsilon, minval=minval, modelMask=modelMask,
+                radius=radius, **kwargs,
+            )
+        ) * (0.5 / epsilon)
+        return patch, patch_dx, patch_dy
+
+    def getFourierTransform(self, px, py, radius):
+        return self._local(px, py).getFourierTransform(px, py, radius)

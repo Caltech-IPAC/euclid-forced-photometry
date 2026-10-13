@@ -1,8 +1,9 @@
 """One-call driver: ``run_forced_photometry(prior=..., target_bands=...)``.
 
-Composes the per-step functions in catalog / cutouts / psf / images /
-models / selection / fit / nisp / wise / irac; the same step functions are
-exposed individually for stage-by-stage use.
+Composes the per-step functions: Euclid data (``euclid``), the prior
+models (``sources``, ``selection``), the shared forced-photometry recipe
+(``forced``) and the target bands (``euclid.nisp``, ``wise``, ``irac``);
+the same step functions are exposed individually for stage-by-stage use.
 
 ``prior`` describes where positions and shapes come from (``band``,
 ``objects`` = "mer" or "coords", ``model_selection`` = "prior" / "tree" /
@@ -21,22 +22,22 @@ from pathlib import Path
 
 import numpy as np
 
-from .catalog import query_mer_catalog
 from .config import DEFAULT_DATA_DIR
-from .cutouts import discover_mer_mosaics, fetch_cutout, trim_catalog_to_cutout
-from .fit import (
+from .euclid.catalog import query_mer_catalog
+from .euclid.cutouts import discover_mer_mosaics, fetch_cutout
+from .euclid.image import build_tractor_image
+from .euclid.nisp import fit_nisp_forced
+from .euclid.psf import extract_catalog_psf, extract_grid_psf, psf_summary
+from .forced import (
     fit_forced_photometry,
     fit_free_shapes,
+    fluxes_ujy,
     refine_positions,
 )
-from .images import build_tractor_image
-from .models import build_sources_from_coords, build_sources_from_mer
-from .nisp import fit_nisp_forced
-from .psf import extract_catalog_psf, extract_grid_psf, psf_summary
+from .scene import footprint_mask, trim_catalog_to_cutout
 from .selection import run_model_selection, unlisted_sep_detections
+from .sources import build_sources_from_coords, build_sources_from_mer
 from .wise import fetch_unwise_cutouts, fit_wise_forced, get_wise_psf
-
-_UJY_PER_NMGY = 3.631
 
 _VALID_PRIOR_BANDS = {"VIS", "Y", "J", "H"}
 _VALID_OBJECTS = {"mer", "free", "coords"}
@@ -299,7 +300,8 @@ def _drop_neighbour_rows(result, n_keep: int) -> None:
     if result.chosen_models is not None:
         result.chosen_models = list(result.chosen_models[:n_keep])
     for r in [*(result.wise_results or {}).values(),
-              *(result.irac_results or {}).values()]:
+              *(result.irac_results or {}).values(),
+              *(result.ground_results or {}).values()]:
         for key in ("flux_ujy", "flux_err_ujy", "flux_err_stat_ujy",
                     "position_shift_arcsec"):
             if key in r and len(r[key]) == n_total:
@@ -313,16 +315,9 @@ def _drop_coords_outside_cutout(parsed: dict, wcs, shape, *, margin_pix: int = 1
     filtered to the survivors; scalar entries (e.g. a single ``model`` string,
     or a broadcast single flux/shape value) are preserved unchanged.
     """
-    H, W = shape
     ra = np.atleast_1d(np.asarray(parsed["ra"], float))
-    dec = np.atleast_1d(np.asarray(parsed["dec"], float))
     n = len(ra)
-    keep = np.ones(n, dtype=bool)
-    for i in range(n):
-        px, py = wcs.world_to_pixel_values(ra[i], dec[i])
-        if not (margin_pix <= px < W - margin_pix
-                and margin_pix <= py < H - margin_pix):
-            keep[i] = False
+    keep = footprint_mask(ra, parsed["dec"], wcs, shape, margin_pix=-margin_pix)
     n_dropped = int((~keep).sum())
     if n_dropped == 0:
         return parsed, 0
@@ -352,6 +347,7 @@ class ForcedPhotometryResult:
     chosen_models: list | None = None
     wise_results: dict | None = None
     irac_results: dict | None = None
+    ground_results: dict | None = None
     # band -> info dict from calibrate.measure_error_inflation; the
     # inflation factors are already applied to flux_errs_ujy.
     error_calibration: dict = field(default_factory=dict)
@@ -383,12 +379,14 @@ class ForcedPhotometryResult:
         Available for the prior band (the model is rendered from the
         fitted sources), and for every fitted WISE and IRAC band. Images are
         in microJansky per pixel and ``invvar`` in 1/(microJansky/pixel)^2.
+        Ground images are on their own pixel grid.
         """
         from .viz import UJY_PER_PIXEL, ujy_per_unit
         band = str(band).upper() if str(band).upper().startswith(
             ("W", "IRAC")) else str(band)
         for results, is_wise in ((self.wise_results, True),
-                                 (self.irac_results, False)):
+                                 (self.irac_results, False),
+                                 (self.ground_results, False)):
             if results and band in results:
                 r = results[band]
                 f = ujy_per_unit(band=band) if is_wise else 1.0
@@ -399,7 +397,7 @@ class ForcedPhotometryResult:
         if band != self.prior.get("band"):
             raise ValueError(
                 f"no images for {band!r}; available: the prior band "
-                f"{self.prior.get('band')!r} and the WISE/IRAC bands fitted")
+                f"{self.prior.get('band')!r} and the WISE/IRAC/ground bands fitted")
         from tractor import Tractor
         cutout = self.cutouts[band]
         persource = self.psf_mode == 'nearest-source-position'
@@ -414,6 +412,632 @@ class ForcedPhotometryResult:
         return {"data": data, "model": model, "residual": data - model,
                 "invvar": np.asarray(tim.getInvvar()) / f**2, "wcs": cutout.wcs,
                 "unit": UJY_PER_PIXEL}
+
+
+@dataclass
+class _Run:
+    """Settings of one run_forced_photometry call, shared by its stages."""
+    target_ra: object
+    target_dec: object
+    cutout_size_arcsec: object
+    prior: object
+    target_bands: object
+    prior_band: object
+    flux_col: object
+    euclid_bands: object
+    data_dir: object
+    cutout_dir: object
+    psf_dir: object
+    wise_dir: object
+    half_size_deg: object
+    verbose: object
+    force_download: object
+    n_workers: object
+    persource_psf: object
+    with_flag: object
+    mask_bright_stars: object
+    psf_product: object
+
+
+def _load_source_list(run, result, user_coords, mer_catalog):
+    """Stage 1: the source list (MER catalog, a supplied catalog, or user positions)."""
+    target_ra = run.target_ra
+    target_dec = run.target_dec
+    cutout_size_arcsec = run.cutout_size_arcsec
+    prior = run.prior
+    flux_col = run.flux_col
+    data_dir = run.data_dir
+    half_size_deg = run.half_size_deg
+    verbose = run.verbose
+    force_download = run.force_download
+    if mer_catalog is not None and prior["objects"] == "coords":
+        raise ValueError(
+            "mer_catalog is ignored by prior['objects']='coords' (positions "
+            "come from user_coords); pass objects='mer' or 'free' to "
+            "measure a caller-supplied catalog.")
+    parsed_coords = None
+    if prior["objects"] == "coords" or (
+            prior["objects"] == "free" and user_coords is not None):
+        # "coords" measures the supplied positions with fixed classes;
+        # "free" + user_coords seeds the tree with them instead of a MER
+        # query.
+        parsed_coords = _parse_user_coords(user_coords)
+        if verbose:
+            print(f"[1/7] using {len(parsed_coords['ra'])} user-supplied source "
+                  f"position(s) (no MER query)")
+        result.mer_cat = _synthetic_mer_from_coords(parsed_coords, flux_col)
+    elif user_coords is not None:
+        raise ValueError(
+            "user_coords requires prior['objects']='coords' (fixed models) "
+            "or 'free' (model-selection tree at your positions); it is ignored by "
+            f"objects={prior['objects']!r}, which would silently measure "
+            "the MER catalog instead.")
+    elif mer_catalog is not None:
+        if verbose:
+            print(f"[1/7] using caller-supplied MER catalog "
+                  f"({len(mer_catalog)} rows; no query, no cache)")
+        result.mer_cat = mer_catalog
+    else:
+        # Cache the MER catalog so a re-run skips the IRSA TAP query.
+        mer_cache = data_dir / (
+            f"mer_catalog_{target_ra:.4f}_{target_dec:.4f}"
+            f"_{int(round(cutout_size_arcsec))}.fits")
+        if mer_cache.exists() and not force_download:
+            from astropy.table import Table
+            if verbose:
+                print(f"[1/7] MER catalog from cache ({mer_cache.name})")
+            result.mer_cat = Table.read(mer_cache)
+        else:
+            if verbose:
+                print(f"[1/7] query MER catalog at ({target_ra:.4f}, {target_dec:.4f})")
+            result.mer_cat = query_mer_catalog(target_ra, target_dec, half_size_deg)
+            try:
+                mer_cache.parent.mkdir(parents=True, exist_ok=True)
+                tmp = mer_cache.with_name(mer_cache.stem + ".tmp.fits")
+                result.mer_cat.write(tmp, overwrite=True)
+                tmp.replace(mer_cache)
+            except Exception as exc:
+                import warnings
+                warnings.warn(
+                    f"could not cache the MER catalog to {mer_cache} "
+                    f"({exc!r}); the run continues uncached.", stacklevel=2)
+    return parsed_coords
+
+
+def _load_cutouts(run, result, provided, parsed_coords):
+    """Stages 2-3: MER mosaics (discovered lazily) and the band cutouts."""
+    target_ra = run.target_ra
+    target_dec = run.target_dec
+    cutout_size_arcsec = run.cutout_size_arcsec
+    target_bands = run.target_bands
+    prior_band = run.prior_band
+    flux_col = run.flux_col
+    euclid_bands = run.euclid_bands
+    cutout_dir = run.cutout_dir
+    half_size_deg = run.half_size_deg
+    verbose = run.verbose
+    force_download = run.force_download
+    n_workers = run.n_workers
+    with_flag = run.with_flag
+    mask_bright_stars = run.mask_bright_stars
+    if verbose:
+        print(f"[2/7] discover mosaics for {', '.join(euclid_bands)} "
+              f"(lazy; only on a cache miss)")
+    products = _LazyProducts(lambda: discover_mer_mosaics(
+        target_ra, target_dec, half_size_deg, bands=tuple(set(euclid_bands))))
+
+    provided_cutouts = dict(provided) if provided else {}
+    unknown_provided = set(provided_cutouts) - set(euclid_bands)
+    if unknown_provided:
+        raise ValueError(
+            f"cutouts= contains bands not used by this run: "
+            f"{sorted(unknown_provided)} (run uses {list(euclid_bands)}).")
+    if verbose:
+        n_prov = len(provided_cutouts)
+        print(f"[3/7] fetch cutouts: {', '.join(euclid_bands)}"
+              + (f" ({n_prov} caller-supplied)" if n_prov else ""))
+    cutouts = {}
+
+    def _fetch_one(band):
+        if band in provided_cutouts:
+            return band, provided_cutouts[band]
+        return band, fetch_cutout(
+            band, target_ra, target_dec, cutout_size_arcsec,
+            products=products, data_dir=cutout_dir,
+            force_download=force_download,
+            # mask_bright_stars needs the FLG plane (STARSIGNAL bit) on the
+            # prior band; the NISP FLG planes feed the coadd-fatal bad-bit
+            # veto inside build_tractor_image.
+            with_flag=(with_flag and band == prior_band)
+                      or (mask_bright_stars is True
+                          and band in (prior_band,) + tuple(target_bands["euclid"])))
+
+    if n_workers > 1 and len(euclid_bands) > 1:
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(
+                min(n_workers, len(euclid_bands))) as ex:
+            for band, cut in ex.map(_fetch_one, euclid_bands):
+                cutouts[band] = cut
+    else:
+        for band in euclid_bands:
+            _, cutouts[band] = _fetch_one(band)
+    result.cutouts = cutouts
+    if parsed_coords is None:
+        result.mer_cat = trim_catalog_to_cutout(
+            result.mer_cat, cutouts[prior_band].wcs, cutouts[prior_band].shape)
+    else:
+        # An out-of-image position would make Tractor raise an IndexError
+        # mid-optimization; drop them up front.
+        parsed_coords, n_dropped = _drop_coords_outside_cutout(
+            parsed_coords, cutouts[prior_band].wcs, cutouts[prior_band].shape)
+        if n_dropped:
+            import warnings
+            warnings.warn(
+                f"{n_dropped} user coordinate(s) fell outside the "
+                f"{cutout_size_arcsec:g}\" cutout and were dropped; widen "
+                "cutout_size_arcsec to include them.", stacklevel=2)
+            result.mer_cat = _synthetic_mer_from_coords(parsed_coords, flux_col)
+        if len(parsed_coords["ra"]) == 0:
+            raise ValueError(
+                "all user coordinates fall outside the cutout; nothing to fit. "
+                "Check the positions or widen cutout_size_arcsec.")
+    return products, parsed_coords
+
+
+def _load_psfs(run, result, products, parsed_coords):
+    """Stage 4: the MER PSF samples for every Euclid band."""
+    target_ra = run.target_ra
+    target_dec = run.target_dec
+    cutout_size_arcsec = run.cutout_size_arcsec
+    euclid_bands = run.euclid_bands
+    psf_dir = run.psf_dir
+    verbose = run.verbose
+    force_download = run.force_download
+    n_workers = run.n_workers
+    persource_psf = run.persource_psf
+    psf_product = run.psf_product
+    cutouts = result.cutouts
+    chosen_product = _select_psf_product(psf_product, parsed_coords is not None)
+    psf_radius = max(60.0, float(cutout_size_arcsec) * 0.75)
+    if verbose:
+        print(f"[4/7] build per-band PSFs ({chosen_product.upper()}-PSF, "
+              f"radius={psf_radius:.0f}\")")
+    _extractors = {"catalog": extract_catalog_psf, "grid": extract_grid_psf}
+    _other = {"catalog": "grid", "grid": "catalog"}
+
+    def _extract_psf(band):
+        kw = dict(products=products, radius_arcsec=psf_radius,
+                  tile_id=cutouts[band].header.get("MERTILE"),
+                  data_dir=psf_dir, force_download=force_download)
+        try:
+            pd = _extractors[chosen_product](band, target_ra, target_dec, **kw)
+        except Exception as exc:           # product missing / fetch failed
+            if psf_product != "auto":
+                raise
+            pd = None
+            reason = repr(exc)
+        else:
+            reason = "no stamps near the target"
+        if pd is None or len(pd.get("stamps", ())) == 0:
+            if psf_product != "auto":
+                raise ValueError(f"No {chosen_product.upper()}-PSF stamps for {band}")
+            import warnings
+            fallback = _other[chosen_product]
+            warnings.warn(
+                f"{chosen_product.upper()}-PSF unavailable for band "
+                f"{band!r} ({reason}); falling back to "
+                f"{fallback.upper()}-PSF.", stacklevel=2)
+            pd = _extractors[fallback](band, target_ra, target_dec, **kw)
+        return pd
+
+    if n_workers > 1 and len(euclid_bands) > 1:
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(
+                min(n_workers, len(euclid_bands))) as ex:
+            for band, pd in zip(euclid_bands,
+                                ex.map(_extract_psf, euclid_bands),
+                                strict=True):
+                result.psf_data[band] = pd
+    else:
+        for band in euclid_bands:
+            result.psf_data[band] = _extract_psf(band)
+    if not persource_psf:
+        for band in euclid_bands:
+            avg, _ = psf_summary(result.psf_data[band])
+            result.psf_stamps[band] = avg
+
+
+def _mask_bright_stars(run, result, parsed_coords):
+    """Stage 5a: the prior-band bright-star pixel veto (shared by NISP)."""
+    target_bands = run.target_bands
+    prior_band = run.prior_band
+    flux_col = run.flux_col
+    verbose = run.verbose
+    mask_bright_stars = run.mask_bright_stars
+    cutouts = result.cutouts
+    if mask_bright_stars is True:
+        flag_plane = getattr(cutouts[prior_band], "flag", None)
+        if flag_plane is None:
+            import warnings
+            warnings.warn(
+                "mask_bright_stars=True needs the MER FLG plane and none "
+                "is available for the prior band; skipping the bright-star "
+                "pixel mask. Pass a dict of bright_star_pixel_mask keywords "
+                "to use the geometric fallback instead.", stacklevel=2)
+        else:
+            from .euclid.flags import starsignal_pixel_mask
+            star_mask = starsignal_pixel_mask(cutouts[prior_band])
+            result.prior_pixel_mask = star_mask
+            if verbose:
+                pct = 100.0 * star_mask.mean()
+                print(f"[5a] STARSIGNAL bright-star mask: "
+                      f"{int(star_mask.sum())} pixels ({pct:.2f}%) excluded "
+                      f"from the {prior_band} fit")
+    elif mask_bright_stars:
+        # Geometric fallback; needs the MER star classification, so a
+        # user_coords run cannot use it.
+        if (parsed_coords is not None
+                or "is_star" not in getattr(result.mer_cat, "colnames", [])):
+            import warnings
+            warnings.warn(
+                "mask_bright_stars needs the MER star classification; "
+                "skipping the bright-star pixel mask for this "
+                "user-coordinates run.", stacklevel=2)
+        else:
+            from .euclid.flags import bright_star_pixel_mask, probable_bright_stars
+            mer = result.mer_cat
+            # The classifier abstains on the brightest stars;
+            # probable_bright_stars recovers them via the PSF/Sersic ratio.
+            if {"point_like_prob", "flux_vis_psf",
+                    "flux_vis_sersic"} <= set(mer.colnames):
+                star_flag = probable_bright_stars(mer)
+            else:
+                star_flag = np.asarray(mer["is_star"], bool)
+            # Rank stars by PSF flux when available.
+            star_flux_col = ("flux_vis_psf"
+                             if "flux_vis_psf" in mer.colnames
+                             else flux_col)
+            star_flux = mer[star_flux_col]
+            star_flux = np.asarray(
+                star_flux.filled(np.nan) if hasattr(star_flux, "filled")
+                else star_flux, dtype=float)
+            mask_kwargs = dict(mask_bright_stars) if isinstance(
+                mask_bright_stars, dict) else {}
+            star_mask = bright_star_pixel_mask(
+                cutouts[prior_band].shape, cutouts[prior_band].wcs,
+                np.asarray(mer["ra"], float), np.asarray(mer["dec"], float),
+                star_flux, star_flag, **mask_kwargs)
+            result.prior_pixel_mask = star_mask
+            if verbose:
+                pct = 100.0 * star_mask.mean()
+                print(f"[5a] bright-star pixel mask: {int(star_mask.sum())} "
+                      f"pixels ({pct:.2f}%) excluded from the {prior_band} fit")
+
+    if result.prior_pixel_mask is not None:
+        reference = cutouts[prior_band]
+        for band in target_bands["euclid"]:
+            target = cutouts[band]
+            if (target.shape != reference.shape or not reference.wcs.wcs.compare(
+                    target.wcs.wcs, tolerance=1e-10)):
+                raise ValueError(
+                    "A shared bright-star mask requires aligned native band grids. "
+                    "Fit these tiles separately or construct band-specific masks.")
+
+
+def _build_prior_models(run, result, parsed_coords):
+    """Stage 5: the prior-band Tractor image and the source models."""
+    prior = run.prior
+    prior_band = run.prior_band
+    flux_col = run.flux_col
+    verbose = run.verbose
+    n_workers = run.n_workers
+    persource_psf = run.persource_psf
+    cutouts = result.cutouts
+    psf_fwhm_prior = float(np.median(result.psf_data[prior_band]["fwhm"]))
+
+    tim_prior = build_tractor_image(
+        cutouts[prior_band], result.psf_stamps.get(prior_band),
+        pixel_mask=result.prior_pixel_mask,
+        psf_data=result.psf_data[prior_band] if persource_psf else None)
+
+    n_report = None
+    if prior["objects"] == "free":
+        detect_kw = dict(prior.get("detect") or {})
+        neighbour_kw = {k: detect_kw.pop(k) for k in
+                        ("min_snr", "min_separation_pix", "mask_margin_pix")
+                        if k in detect_kw}
+        if parsed_coords is not None:
+            n_report = len(result.mer_cat)
+            extra = unlisted_sep_detections(
+                result.mer_cat, tim_prior, cutouts[prior_band].data,
+                tim_prior.getInvvar(), **neighbour_kw, **detect_kw)
+            if len(extra["ra"]):
+                from astropy.table import Table, vstack
+                mag_zero = float(cutouts[prior_band].header.get("MAGZERO", 23.9))
+                rows = Table()
+                rows["object_id"] = n_report + np.arange(len(extra["ra"]), dtype=np.int64)
+                rows["ra"] = extra["ra"]
+                rows["dec"] = extra["dec"]
+                rows[flux_col] = np.clip(
+                    extra["flux"] / 10 ** (0.4 * (mag_zero - 23.9)), 0.01, None)
+                result.mer_cat = vstack([result.mer_cat, rows],
+                                        metadata_conflicts="silent")
+                if verbose:
+                    print(f"[5b] {len(rows)} SEP detection(s) share a blob with the "
+                          f"supplied positions: modeled as neighbours, not reported")
+        sources_list, _ = run_model_selection(
+            result.mer_cat, tim_prior,
+            cutouts[prior_band].data, tim_prior.getInvvar(),
+            pixscale_arcsec=cutouts[prior_band].pixel_scale_arcsec,
+            selector=prior.get("selector"),
+            # psf_data enables per_source_psf selectors; the default keeps
+            # the field-average stamp.
+            psf_data=result.psf_data.get(prior_band),
+            n_workers=n_workers,
+            **detect_kw)
+        # Rows the ladder could not place (no blob overlap) fall back to a
+        # fixed-model source so the list stays 1:1 with mer_cat: MER-prior,
+        # or a PointSource at the supplied position for user_coords.
+        if parsed_coords is not None:
+            fallback = build_sources_from_coords(
+                parsed_coords["ra"], parsed_coords["dec"], band=prior_band,
+                flux_guess_ujy=parsed_coords.get("flux_guess_ujy"))
+            if len(result.mer_cat) > n_report:
+                extra_rows = result.mer_cat[n_report:]
+                fallback += build_sources_from_coords(
+                    np.asarray(extra_rows["ra"], float),
+                    np.asarray(extra_rows["dec"], float), band=prior_band,
+                    flux_guess_ujy=np.asarray(extra_rows[flux_col], float))
+        else:
+            fallback = build_sources_from_mer(
+                result.mer_cat, band=prior_band,
+                psf_fwhm_arcsec=psf_fwhm_prior, flux_col=flux_col,
+                pixel_scale_arcsec=cutouts[prior_band].pixel_scale_arcsec)
+        result.sources = [
+            s if s is not None else fb
+            for s, fb in zip(sources_list, fallback, strict=False)]
+    elif prior["objects"] == "coords":
+        _ms = prior["model_selection"]
+        if _ms in _EXPLICIT_MODELS:
+            _model = _ms
+            _re = parsed_coords.get("re_arcsec")
+            if _model != "point" and _re is None:
+                _re = 0.3   # default seed; step 2 adjusts it
+        else:
+            _model = parsed_coords.get("model", "point")
+            _re = parsed_coords.get("re_arcsec")
+        result.sources = build_sources_from_coords(
+            parsed_coords["ra"], parsed_coords["dec"], band=prior_band,
+            flux_guess_ujy=parsed_coords.get("flux_guess_ujy"),
+            model=_model,
+            re_arcsec=_re,
+            axis_ratio=parsed_coords.get("axis_ratio"),
+            position_angle_deg=parsed_coords.get("position_angle_deg"),
+            sersic_n=parsed_coords.get("sersic_n"))
+    else:
+        _ms = prior["model_selection"]
+        result.sources = build_sources_from_mer(
+            result.mer_cat, band=prior_band,
+            psf_fwhm_arcsec=psf_fwhm_prior, flux_col=flux_col,
+            pixel_scale_arcsec=cutouts[prior_band].pixel_scale_arcsec,
+            force_model=_ms if _ms in _EXPLICIT_MODELS else None)
+    result.chosen_models = [type(s).__name__ for s in result.sources]
+    return tim_prior, n_report
+
+
+def _fit_prior(run, result, tim_prior, parsed_coords):
+    """Stage 6: fluxes (and optionally shapes, positions) on the prior band."""
+    prior = run.prior
+    prior_band = run.prior_band
+    flux_col = run.flux_col
+    verbose = run.verbose
+    persource_psf = run.persource_psf
+    if verbose:
+        objects = prior["objects"]
+        action = ("forced-photometry" if not prior["free_shapes"]
+                  else "forced photometry + free shapes")
+        print(f"[6/7] {prior_band} fit ({objects}, {action})")
+    initial_flux = np.asarray(result.mer_cat[flux_col], dtype=float)
+    if parsed_coords is not None and (
+            parsed_coords.get("flux_guess_ujy") is None):
+        # No reference flux for user coords: a placeholder 1 uJy would
+        # reject every source brighter than 100 uJy.
+        initial_flux = np.full(len(initial_flux), np.nan)
+    tractor_prior, fit_quality, prior_err_ujy = fit_forced_photometry(
+        tim_prior, result.sources, band=prior_band,
+        initial_fluxes_ujy=initial_flux, return_errors=True)
+    if prior["free_shapes"]:
+        fit_quality, _ = fit_free_shapes(
+            tractor_prior, tim_prior, result.sources, fit_quality,
+            band=prior_band, initial_fluxes_ujy=initial_flux)
+    if prior["refine_positions"]:
+        if verbose:
+            print(f"[6a] refine positions on {prior_band} (bounded recenter)")
+        fit_quality, _, _ = refine_positions(
+            tractor_prior, tim_prior, result.sources, fit_quality,
+            band=prior_band)
+    if prior["free_shapes"] or prior["refine_positions"]:
+        tractor_prior, final_quality, prior_err_ujy = fit_forced_photometry(
+            tim_prior, result.sources, band=prior_band,
+            initial_fluxes_ujy=initial_flux, return_errors=True)
+        fit_quality &= final_quality
+    result.flux_quality = fit_quality
+
+    if persource_psf:
+        prior_ujy = fluxes_ujy(result.sources, prior_band)
+        with np.errstate(invalid="ignore"):
+            bad = prior_ujy < 0
+            ref_ok = np.isfinite(initial_flux) & (initial_flux > 0)
+            bad |= ref_ok & (np.abs(prior_ujy) > 100.0 * initial_flux)
+        result.flux_quality = result.flux_quality & ~bad
+
+    prior_ujy = fluxes_ujy(result.sources, prior_band)
+    prior_ujy = np.where(result.flux_quality, prior_ujy, np.nan)
+    result.fluxes_ujy[prior_band] = prior_ujy
+    result.flux_errs_ujy[prior_band] = np.where(
+        result.flux_quality, prior_err_ujy, np.nan)
+
+
+def _fit_nisp(run, result):
+    """Stage 7: the NISP target bands with the shared forced recipe."""
+    target_bands = run.target_bands
+    verbose = run.verbose
+    n_workers = run.n_workers
+    persource_psf = run.persource_psf
+    cutouts = result.cutouts
+    nisp_targets = tuple(target_bands["euclid"])
+    if nisp_targets:
+        if verbose:
+            print(f"[7/7] NISP forced phot: {', '.join(nisp_targets)}")
+        nisp = fit_nisp_forced(
+            result.sources,
+            {b: cutouts[b] for b in nisp_targets},
+            {b: result.psf_stamps[b] for b in nisp_targets} if not persource_psf else None,
+            bands=nisp_targets,
+            psf_data=result.psf_data if persource_psf else None,
+            # The NISP mosaics share the prior-band 0.1 arcsec grid, so the
+            # prior fit's bright-star pixel veto carries over unchanged.
+            pixel_mask=result.prior_pixel_mask,
+            n_workers=n_workers,
+        )
+        # A diverged prior fit means an unreliable position/shape; NaN the
+        # propagated flux.
+        for b, d in nisp.items():
+            result.fluxes_ujy[b] = np.where(
+                result.flux_quality, d["flux_ujy"], np.nan)
+            result.flux_errs_ujy[b] = np.where(
+                result.flux_quality, d["flux_err_ujy"], np.nan)
+
+
+def _fit_wise(run, result):
+    """unWISE W1/W2 with the shared forced recipe."""
+    target_ra = run.target_ra
+    target_dec = run.target_dec
+    cutout_size_arcsec = run.cutout_size_arcsec
+    target_bands = run.target_bands
+    prior_band = run.prior_band
+    wise_dir = run.wise_dir
+    verbose = run.verbose
+    force_download = run.force_download
+    wise_targets = tuple(target_bands["wise"])
+    if wise_targets:
+        if verbose:
+            print(f"[+] WISE forced phot: {', '.join(wise_targets)}")
+        wise_size = max(180.0, float(cutout_size_arcsec) + 120.0)
+        wise_cutouts = fetch_unwise_cutouts(
+            target_ra, target_dec, wise_size, data_dir=wise_dir,
+            force_download=force_download)
+        wise_psfs = {
+            "W1": get_wise_psf(1, wise_cutouts["coadd_id"], ra=target_ra, dec=target_dec),
+            "W2": get_wise_psf(2, wise_cutouts["coadd_id"], ra=target_ra, dec=target_dec),
+        }
+        result.wise_results = fit_wise_forced(
+            result.sources, wise_cutouts,
+            ra=target_ra, dec=target_dec,
+            cutout_size_arcsec=cutout_size_arcsec,
+            psf_stamps=wise_psfs, bands=wise_targets,
+            prior_cutout=result.cutouts[prior_band],
+            catalog_cache_dir=wise_dir / "catalogs")
+        for band in wise_targets:
+            if band in result.wise_results:
+                wflux = np.asarray(result.wise_results[band]["flux_ujy"], dtype=float)
+                werr = np.asarray(result.wise_results[band]["flux_err_ujy"], dtype=float)
+                # As for NISP: NaN where the prior fit diverged.
+                result.fluxes_ujy[band] = np.where(
+                    result.flux_quality, wflux, np.nan)
+                result.flux_errs_ujy[band] = np.where(
+                    result.flux_quality, werr, np.nan)
+
+
+def _fit_irac(run, result, irac_options):
+    """Spitzer/IRAC with the shared forced recipe."""
+    target_ra = run.target_ra
+    target_dec = run.target_dec
+    cutout_size_arcsec = run.cutout_size_arcsec
+    target_bands = run.target_bands
+    data_dir = run.data_dir
+    verbose = run.verbose
+    force_download = run.force_download
+    irac_targets = tuple(target_bands["irac"])
+    if irac_targets:
+        from .irac.fit import fit_irac_forced
+        if verbose:
+            print(f"[+] IRAC forced phot: {', '.join(irac_targets)}")
+        options = {"mosaic_backend": "seip", **(irac_options or {})}
+        result.irac_results = fit_irac_forced(
+            result.sources, target_ra, target_dec, cutout_size_arcsec,
+            irac_targets, data_dir=data_dir / "irac",
+            force_download=force_download, verbose=verbose, **options)
+        for band, r in result.irac_results.items():
+            # As for NISP and WISE: NaN where the prior fit diverged.
+            result.fluxes_ujy[band] = np.where(
+                result.flux_quality, r["flux_ujy"], np.nan)
+            result.flux_errs_ujy[band] = np.where(
+                result.flux_quality, r["flux_err_ujy"], np.nan)
+
+
+def _fit_ground(run, result, ground_images, ground_options):
+    """User ground images with the shared forced recipe (``ground_based``)."""
+    import warnings
+    from dataclasses import replace
+
+    from .ground_based import assess_psf, fit_ground, register_image
+    from .ground_based.image import GroundInputs
+
+    options = dict(ground_options or {})
+    register = options.pop("register_wcs", True)
+    min_matches = options.pop("min_matches", 10)
+    taken = {run.prior_band, *run.target_bands["euclid"], *run.target_bands["wise"],
+             *run.target_bands["irac"]}
+    clash = taken & set(ground_images)
+    if clash:
+        raise ValueError(f"ground band names {sorted(clash)} are already used; "
+                         "name each ground image after its filter, e.g. 'g'")
+    n = len(result.sources)
+    row_of = {object_id: i for i, object_id in enumerate(result.mer_cat["object_id"])}
+    prior_cut = result.cutouts[run.prior_band]
+    result.ground_results = {}
+    for band, inputs in ground_images.items():
+        image = inputs.image if isinstance(inputs, GroundInputs) else inputs
+        image = replace(image, band=band)
+        if run.verbose:
+            print(f"[+] ground forced phot: {band}")
+        ny, nx = image.science_ujy.shape
+        corner_ra, corner_dec = image.wcs.pixel_to_world_values(
+            [0, nx - 1, 0, nx - 1], [0, 0, ny - 1, ny - 1])
+        if not footprint_mask(corner_ra, corner_dec, prior_cut.wcs,
+                              prior_cut.shape).all():
+            warnings.warn(
+                f"the {band} image extends beyond the {run.cutout_size_arcsec:g}\" "
+                "Euclid field; sources outside the field are not modelled. "
+                "Enlarge cutout_size_arcsec to cover the image.", stacklevel=3)
+        registration = None
+        if register:
+            registration = register_image(image, result.mer_cat,
+                                          min_matches=min_matches)
+            image = replace(image, wcs=registration.wcs)
+        fit_options = dict(options)
+        if (fit_options.get("psf_mode", "supplied") != "supplied"
+                and "psf_assessment" not in fit_options):
+            if registration is None:
+                raise ValueError("a PSF from image stars needs register_wcs=True")
+            fit_options["psf_assessment"] = assess_psf(image, registration)
+        fit = fit_ground(image, result, band=band, **fit_options)
+        rows = np.array([row_of[i] for i in fit.catalog["object_id"]], dtype=int)
+        flux = np.full(n, np.nan)
+        err = np.full(n, np.nan)
+        flux[rows] = np.asarray(fit.catalog[f"flux_{band}_ujy"], float)
+        err[rows] = np.asarray(fit.catalog[f"flux_err_{band}_ujy"], float)
+        result.ground_results[band] = {
+            "flux_ujy": flux, "flux_err_ujy": err,
+            "data": image.science_ujy, "model": fit.model,
+            "residual": fit.residual, "invvar": image.invvar_ujy,
+            "wcs": image.wcs, "catalog": fit.catalog,
+            "registration": registration,
+        }
+        # As for every band: NaN where the prior fit diverged.
+        result.fluxes_ujy[band] = np.where(result.flux_quality, flux, np.nan)
+        result.flux_errs_ujy[band] = np.where(result.flux_quality, err, np.nan)
 
 
 def run_forced_photometry(
@@ -436,8 +1060,11 @@ def run_forced_photometry(
     cutouts: dict | None = None,
     mer_catalog=None,
     irac_options: dict | None = None,
+    ground_images: dict | None = None,
+    ground_options: dict | None = None,
 ) -> ForcedPhotometryResult:
-    """Forced photometry across Euclid VIS / NISP and optionally unWISE and IRAC.
+    """Forced photometry across Euclid VIS / NISP and optionally unWISE, IRAC
+    and your own ground-based images.
 
     Parameters
     ----------
@@ -530,7 +1157,7 @@ def run_forced_photometry(
         Fetches the FLG planes automatically and works for every
         source-list mode; the covered stars are themselves not measurable
         and carry the ``bright_star`` flag. A dict of
-        :func:`euclid_phot.flags.bright_star_pixel_mask` keywords selects
+        :func:`euclid_phot.euclid.flags.bright_star_pixel_mask` keywords selects
         the geometric fallback for data without the FLG plane. The applied
         mask is stored as ``result.prior_pixel_mask``.
     persource_psf : bool
@@ -564,6 +1191,19 @@ def run_forced_photometry(
         deeper but covers only the Cosmic Dawn fields, ``"pbcd"`` uses
         single-observation mosaics). IRAC inputs are cached under
         ``data_dir / "irac"``.
+    ground_images : dict, optional
+        ``{band: image}`` of your own images, each the output of
+        :func:`euclid_phot.ground_based.make_image` (science, uncertainty and
+        PSF in microJansky). The band name labels the output columns, e.g.
+        ``flux_g_ujy``. Choose the field (``target_ra``, ``target_dec``,
+        ``cutout_size_arcsec``) to cover each image: sources outside it are
+        not modelled. Each image's WCS is first refined on MER stars, which
+        needs a MER source list.
+    ground_options : dict, optional
+        Keywords for :func:`euclid_phot.ground_based.fit_ground`
+        (``psf_mode``, ``background_method``, ``recenter_width_pixels``, ...)
+        plus ``register_wcs`` (default True) and ``min_matches`` (default 10)
+        for the WCS refinement.
 
     Returns
     -------
@@ -588,6 +1228,18 @@ def run_forced_photometry(
     psf_dir = data_dir / "psf"
     wise_dir = data_dir / "wise"
 
+    half_size_deg = cutout_size_arcsec / 2.0 / 3600.0
+    euclid_bands = (prior_band,) + tuple(target_bands["euclid"])
+    run = _Run(
+        target_ra=target_ra, target_dec=target_dec,
+        cutout_size_arcsec=cutout_size_arcsec, prior=prior,
+        target_bands=target_bands, prior_band=prior_band, flux_col=flux_col,
+        euclid_bands=euclid_bands, data_dir=data_dir, cutout_dir=cutout_dir,
+        psf_dir=psf_dir, wise_dir=wise_dir, half_size_deg=half_size_deg,
+        verbose=verbose, force_download=force_download, n_workers=n_workers,
+        persource_psf=persource_psf, with_flag=with_flag,
+        mask_bright_stars=mask_bright_stars, psf_product=psf_product)
+
     result = ForcedPhotometryResult(
         target=(target_ra, target_dec, cutout_size_arcsec),
         prior=dict(prior),
@@ -595,413 +1247,15 @@ def run_forced_photometry(
         data_dir=data_dir)
     result.psf_mode = 'nearest-source-position' if persource_psf else 'field-average'
 
-    half_size_deg = cutout_size_arcsec / 2.0 / 3600.0
-    if mer_catalog is not None and prior["objects"] == "coords":
-        raise ValueError(
-            "mer_catalog is ignored by prior['objects']='coords' (positions "
-            "come from user_coords); pass objects='mer' or 'free' to "
-            "measure a caller-supplied catalog.")
-    parsed_coords = None
-    if prior["objects"] == "coords" or (
-            prior["objects"] == "free" and user_coords is not None):
-        # "coords" measures the supplied positions with fixed classes;
-        # "free" + user_coords seeds the tree with them instead of a MER
-        # query.
-        parsed_coords = _parse_user_coords(user_coords)
-        if verbose:
-            print(f"[1/7] using {len(parsed_coords['ra'])} user-supplied source "
-                  f"position(s) (no MER query)")
-        result.mer_cat = _synthetic_mer_from_coords(parsed_coords, flux_col)
-    elif user_coords is not None:
-        raise ValueError(
-            "user_coords requires prior['objects']='coords' (fixed models) "
-            "or 'free' (model-selection tree at your positions); it is ignored by "
-            f"objects={prior['objects']!r}, which would silently measure "
-            "the MER catalog instead.")
-    elif mer_catalog is not None:
-        if verbose:
-            print(f"[1/7] using caller-supplied MER catalog "
-                  f"({len(mer_catalog)} rows; no query, no cache)")
-        result.mer_cat = mer_catalog
-    else:
-        # Cache the MER catalog so a re-run skips the IRSA TAP query.
-        mer_cache = data_dir / (
-            f"mer_catalog_{target_ra:.4f}_{target_dec:.4f}"
-            f"_{int(round(cutout_size_arcsec))}.fits")
-        if mer_cache.exists() and not force_download:
-            from astropy.table import Table
-            if verbose:
-                print(f"[1/7] MER catalog from cache ({mer_cache.name})")
-            result.mer_cat = Table.read(mer_cache)
-        else:
-            if verbose:
-                print(f"[1/7] query MER catalog at ({target_ra:.4f}, {target_dec:.4f})")
-            result.mer_cat = query_mer_catalog(target_ra, target_dec, half_size_deg)
-            try:
-                mer_cache.parent.mkdir(parents=True, exist_ok=True)
-                tmp = mer_cache.with_name(mer_cache.stem + ".tmp.fits")
-                result.mer_cat.write(tmp, overwrite=True)
-                tmp.replace(mer_cache)
-            except Exception as exc:
-                import warnings
-                warnings.warn(
-                    f"could not cache the MER catalog to {mer_cache} "
-                    f"({exc!r}); the run continues uncached.", stacklevel=2)
-
-    euclid_bands = (prior_band,) + tuple(target_bands["euclid"])
-
-    if verbose:
-        print(f"[2/7] discover mosaics for {', '.join(euclid_bands)} "
-              f"(lazy; only on a cache miss)")
-    products = _LazyProducts(lambda: discover_mer_mosaics(
-        target_ra, target_dec, half_size_deg, bands=tuple(set(euclid_bands))))
-
-    provided_cutouts = dict(cutouts) if cutouts else {}
-    unknown_provided = set(provided_cutouts) - set(euclid_bands)
-    if unknown_provided:
-        raise ValueError(
-            f"cutouts= contains bands not used by this run: "
-            f"{sorted(unknown_provided)} (run uses {list(euclid_bands)}).")
-    if verbose:
-        n_prov = len(provided_cutouts)
-        print(f"[3/7] fetch cutouts: {', '.join(euclid_bands)}"
-              + (f" ({n_prov} caller-supplied)" if n_prov else ""))
-    cutouts = {}
-
-    def _fetch_one(band):
-        if band in provided_cutouts:
-            return band, provided_cutouts[band]
-        return band, fetch_cutout(
-            band, target_ra, target_dec, cutout_size_arcsec,
-            products=products, data_dir=cutout_dir,
-            force_download=force_download,
-            # mask_bright_stars needs the FLG plane (STARSIGNAL bit) on the
-            # prior band; the NISP FLG planes feed the coadd-fatal bad-bit
-            # veto inside build_tractor_image.
-            with_flag=(with_flag and band == prior_band)
-                      or (mask_bright_stars is True
-                          and band in (prior_band,) + tuple(target_bands["euclid"])))
-
-    if n_workers > 1 and len(euclid_bands) > 1:
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor(
-                min(n_workers, len(euclid_bands))) as ex:
-            for band, cut in ex.map(_fetch_one, euclid_bands):
-                cutouts[band] = cut
-    else:
-        for band in euclid_bands:
-            _, cutouts[band] = _fetch_one(band)
-    result.cutouts = cutouts
-    if parsed_coords is None:
-        result.mer_cat = trim_catalog_to_cutout(
-            result.mer_cat, cutouts[prior_band].wcs, cutouts[prior_band].shape)
-    else:
-        # An out-of-image position would make Tractor raise an IndexError
-        # mid-optimization; drop them up front.
-        parsed_coords, n_dropped = _drop_coords_outside_cutout(
-            parsed_coords, cutouts[prior_band].wcs, cutouts[prior_band].shape)
-        if n_dropped:
-            import warnings
-            warnings.warn(
-                f"{n_dropped} user coordinate(s) fell outside the "
-                f"{cutout_size_arcsec:g}\" cutout and were dropped; widen "
-                "cutout_size_arcsec to include them.", stacklevel=2)
-            result.mer_cat = _synthetic_mer_from_coords(parsed_coords, flux_col)
-        if len(parsed_coords["ra"]) == 0:
-            raise ValueError(
-                "all user coordinates fall outside the cutout; nothing to fit. "
-                "Check the positions or widen cutout_size_arcsec.")
-
-    chosen_product = _select_psf_product(psf_product, parsed_coords is not None)
-    psf_radius = max(60.0, float(cutout_size_arcsec) * 0.75)
-    if verbose:
-        print(f"[4/7] build per-band PSFs ({chosen_product.upper()}-PSF, "
-              f"radius={psf_radius:.0f}\")")
-    _extractors = {"catalog": extract_catalog_psf, "grid": extract_grid_psf}
-    _other = {"catalog": "grid", "grid": "catalog"}
-
-    def _extract_psf(band):
-        kw = dict(products=products, radius_arcsec=psf_radius,
-                  tile_id=cutouts[band].header.get("MERTILE"),
-                  data_dir=psf_dir, force_download=force_download)
-        try:
-            pd = _extractors[chosen_product](band, target_ra, target_dec, **kw)
-        except Exception as exc:           # product missing / fetch failed
-            if psf_product != "auto":
-                raise
-            pd = None
-            reason = repr(exc)
-        else:
-            reason = "no stamps near the target"
-        if pd is None or len(pd.get("stamps", ())) == 0:
-            if psf_product != "auto":
-                raise ValueError(f"No {chosen_product.upper()}-PSF stamps for {band}")
-            import warnings
-            fallback = _other[chosen_product]
-            warnings.warn(
-                f"{chosen_product.upper()}-PSF unavailable for band "
-                f"{band!r} ({reason}); falling back to "
-                f"{fallback.upper()}-PSF.", stacklevel=2)
-            pd = _extractors[fallback](band, target_ra, target_dec, **kw)
-        return pd
-
-    if n_workers > 1 and len(euclid_bands) > 1:
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor(
-                min(n_workers, len(euclid_bands))) as ex:
-            for band, pd in zip(euclid_bands,
-                                ex.map(_extract_psf, euclid_bands),
-                                strict=True):
-                result.psf_data[band] = pd
-    else:
-        for band in euclid_bands:
-            result.psf_data[band] = _extract_psf(band)
-    if not persource_psf:
-        for band in euclid_bands:
-            avg, _ = psf_summary(result.psf_data[band])
-            result.psf_stamps[band] = avg
-
+    parsed_coords = _load_source_list(run, result, user_coords, mer_catalog)
+    products, parsed_coords = _load_cutouts(run, result, cutouts, parsed_coords)
+    _load_psfs(run, result, products, parsed_coords)
     if verbose:
         print(f"[5/7] build Tractor image + source models on {prior_band}")
-    psf_fwhm_prior = float(np.median(result.psf_data[prior_band]["fwhm"]))
-
-    prior_invvar = None
-    if mask_bright_stars is True:
-        flag_plane = getattr(cutouts[prior_band], "flag", None)
-        if flag_plane is None:
-            import warnings
-            warnings.warn(
-                "mask_bright_stars=True needs the MER FLG plane and none "
-                "is available for the prior band; skipping the bright-star "
-                "pixel mask. Pass a dict of bright_star_pixel_mask keywords "
-                "to use the geometric fallback instead.", stacklevel=2)
-        else:
-            from .flags import starsignal_pixel_mask
-            from .images import _invvar_from_rms
-            star_mask = starsignal_pixel_mask(cutouts[prior_band])
-            base_iv = _invvar_from_rms(cutouts[prior_band].rms,
-                                       cutouts[prior_band].data)
-            prior_invvar = np.where(star_mask, 0.0, base_iv)
-            result.prior_pixel_mask = star_mask
-            if verbose:
-                pct = 100.0 * star_mask.mean()
-                print(f"[5a] STARSIGNAL bright-star mask: "
-                      f"{int(star_mask.sum())} pixels ({pct:.2f}%) excluded "
-                      f"from the {prior_band} fit")
-    elif mask_bright_stars:
-        # Geometric fallback; needs the MER star classification, so a
-        # user_coords run cannot use it.
-        if (parsed_coords is not None
-                or "is_star" not in getattr(result.mer_cat, "colnames", [])):
-            import warnings
-            warnings.warn(
-                "mask_bright_stars needs the MER star classification; "
-                "skipping the bright-star pixel mask for this "
-                "user-coordinates run.", stacklevel=2)
-        else:
-            from .flags import bright_star_pixel_mask, probable_bright_stars
-            from .images import _invvar_from_rms
-            mer = result.mer_cat
-            # The classifier abstains on the brightest stars;
-            # probable_bright_stars recovers them via the PSF/Sersic ratio.
-            if {"point_like_prob", "flux_vis_psf",
-                    "flux_vis_sersic"} <= set(mer.colnames):
-                star_flag = probable_bright_stars(mer)
-            else:
-                star_flag = np.asarray(mer["is_star"], bool)
-            # Rank stars by PSF flux when available.
-            star_flux_col = ("flux_vis_psf"
-                             if "flux_vis_psf" in mer.colnames
-                             else flux_col)
-            star_flux = mer[star_flux_col]
-            star_flux = np.asarray(
-                star_flux.filled(np.nan) if hasattr(star_flux, "filled")
-                else star_flux, dtype=float)
-            mask_kwargs = dict(mask_bright_stars) if isinstance(
-                mask_bright_stars, dict) else {}
-            star_mask = bright_star_pixel_mask(
-                cutouts[prior_band].shape, cutouts[prior_band].wcs,
-                np.asarray(mer["ra"], float), np.asarray(mer["dec"], float),
-                star_flux, star_flag, **mask_kwargs)
-            base_iv = _invvar_from_rms(cutouts[prior_band].rms,
-                                       cutouts[prior_band].data)
-            prior_invvar = np.where(star_mask, 0.0, base_iv)
-            result.prior_pixel_mask = star_mask
-            if verbose:
-                pct = 100.0 * star_mask.mean()
-                print(f"[5a] bright-star pixel mask: {int(star_mask.sum())} "
-                      f"pixels ({pct:.2f}%) excluded from the {prior_band} fit")
-
-    if result.prior_pixel_mask is not None:
-        reference = cutouts[prior_band]
-        for band in target_bands["euclid"]:
-            target = cutouts[band]
-            if (target.shape != reference.shape or not reference.wcs.wcs.compare(
-                    target.wcs.wcs, tolerance=1e-10)):
-                raise ValueError(
-                    "A shared bright-star mask requires aligned native band grids. "
-                    "Fit these tiles separately or construct band-specific masks.")
-
-    tim_prior = build_tractor_image(
-        cutouts[prior_band], result.psf_stamps.get(prior_band),
-        invvar=prior_invvar,
-        psf_data=result.psf_data[prior_band] if persource_psf else None)
-
-    n_report = None
-    if prior["objects"] == "free":
-        detect_kw = dict(prior.get("detect") or {})
-        neighbour_kw = {k: detect_kw.pop(k) for k in
-                        ("min_snr", "min_separation_pix", "mask_margin_pix")
-                        if k in detect_kw}
-        if parsed_coords is not None:
-            n_report = len(result.mer_cat)
-            extra = unlisted_sep_detections(
-                result.mer_cat, tim_prior, cutouts[prior_band].data,
-                tim_prior.getInvvar(), **neighbour_kw, **detect_kw)
-            if len(extra["ra"]):
-                from astropy.table import Table, vstack
-                mag_zero = float(cutouts[prior_band].header.get("MAGZERO", 23.9))
-                rows = Table()
-                rows["object_id"] = n_report + np.arange(len(extra["ra"]), dtype=np.int64)
-                rows["ra"] = extra["ra"]
-                rows["dec"] = extra["dec"]
-                rows[flux_col] = np.clip(
-                    extra["flux"] / 10 ** (0.4 * (mag_zero - 23.9)), 0.01, None)
-                result.mer_cat = vstack([result.mer_cat, rows],
-                                        metadata_conflicts="silent")
-                if verbose:
-                    print(f"[5b] {len(rows)} SEP detection(s) share a blob with the "
-                          f"supplied positions: modeled as neighbours, not reported")
-        sources_list, _ = run_model_selection(
-            result.mer_cat, tim_prior,
-            cutouts[prior_band].data, tim_prior.getInvvar(),
-            pixscale_arcsec=cutouts[prior_band].pixel_scale_arcsec,
-            selector=prior.get("selector"),
-            # psf_data enables per_source_psf selectors; the default keeps
-            # the field-average stamp.
-            psf_data=result.psf_data.get(prior_band),
-            n_workers=n_workers,
-            **detect_kw)
-        # Rows the ladder could not place (no blob overlap) fall back to a
-        # fixed-model source so the list stays 1:1 with mer_cat: MER-prior,
-        # or a PointSource at the supplied position for user_coords.
-        if parsed_coords is not None:
-            fallback = build_sources_from_coords(
-                parsed_coords["ra"], parsed_coords["dec"], band=prior_band,
-                flux_guess_ujy=parsed_coords.get("flux_guess_ujy"))
-            if len(result.mer_cat) > n_report:
-                extra_rows = result.mer_cat[n_report:]
-                fallback += build_sources_from_coords(
-                    np.asarray(extra_rows["ra"], float),
-                    np.asarray(extra_rows["dec"], float), band=prior_band,
-                    flux_guess_ujy=np.asarray(extra_rows[flux_col], float))
-        else:
-            fallback = build_sources_from_mer(
-                result.mer_cat, band=prior_band,
-                psf_fwhm_arcsec=psf_fwhm_prior, flux_col=flux_col,
-                pixel_scale_arcsec=cutouts[prior_band].pixel_scale_arcsec)
-        result.sources = [
-            s if s is not None else fb
-            for s, fb in zip(sources_list, fallback, strict=False)]
-    elif prior["objects"] == "coords":
-        _ms = prior["model_selection"]
-        if _ms in _EXPLICIT_MODELS:
-            _model = _ms
-            _re = parsed_coords.get("re_arcsec")
-            if _model != "point" and _re is None:
-                _re = 0.3   # default seed; step 2 adjusts it
-        else:
-            _model = parsed_coords.get("model", "point")
-            _re = parsed_coords.get("re_arcsec")
-        result.sources = build_sources_from_coords(
-            parsed_coords["ra"], parsed_coords["dec"], band=prior_band,
-            flux_guess_ujy=parsed_coords.get("flux_guess_ujy"),
-            model=_model,
-            re_arcsec=_re,
-            axis_ratio=parsed_coords.get("axis_ratio"),
-            position_angle_deg=parsed_coords.get("position_angle_deg"),
-            sersic_n=parsed_coords.get("sersic_n"))
-    else:
-        _ms = prior["model_selection"]
-        result.sources = build_sources_from_mer(
-            result.mer_cat, band=prior_band,
-            psf_fwhm_arcsec=psf_fwhm_prior, flux_col=flux_col,
-            pixel_scale_arcsec=cutouts[prior_band].pixel_scale_arcsec,
-            force_model=_ms if _ms in _EXPLICIT_MODELS else None)
-    result.chosen_models = [type(s).__name__ for s in result.sources]
-
-    if verbose:
-        objects = prior["objects"]
-        action = ("forced-photometry" if not prior["free_shapes"]
-                  else "forced photometry + free shapes")
-        print(f"[6/7] {prior_band} fit ({objects}, {action})")
-    initial_flux = np.asarray(result.mer_cat[flux_col], dtype=float)
-    if parsed_coords is not None and (
-            parsed_coords.get("flux_guess_ujy") is None):
-        # No reference flux for user coords: a placeholder 1 uJy would
-        # reject every source brighter than 100 uJy.
-        initial_flux = np.full(len(initial_flux), np.nan)
-    tractor_prior, fit_quality, prior_err_ujy = fit_forced_photometry(
-        tim_prior, result.sources, band=prior_band,
-        initial_fluxes_ujy=initial_flux, return_errors=True)
-    if prior["free_shapes"]:
-        fit_quality, _ = fit_free_shapes(
-            tractor_prior, tim_prior, result.sources, fit_quality,
-            band=prior_band, initial_fluxes_ujy=initial_flux)
-    if prior["refine_positions"]:
-        if verbose:
-            print(f"[6a] refine positions on {prior_band} (bounded recenter)")
-        fit_quality, _, _ = refine_positions(
-            tractor_prior, tim_prior, result.sources, fit_quality,
-            band=prior_band)
-    if prior["free_shapes"] or prior["refine_positions"]:
-        tractor_prior, final_quality, prior_err_ujy = fit_forced_photometry(
-            tim_prior, result.sources, band=prior_band,
-            initial_fluxes_ujy=initial_flux, return_errors=True)
-        fit_quality &= final_quality
-    result.flux_quality = fit_quality
-
-    if persource_psf:
-        prior_ujy = np.array([
-            s.brightness.getFlux(prior_band) for s in result.sources
-        ]) * _UJY_PER_NMGY
-        with np.errstate(invalid="ignore"):
-            bad = prior_ujy < 0
-            ref_ok = np.isfinite(initial_flux) & (initial_flux > 0)
-            bad |= ref_ok & (np.abs(prior_ujy) > 100.0 * initial_flux)
-        result.flux_quality = result.flux_quality & ~bad
-
-    prior_ujy = np.array([
-        s.brightness.getFlux(prior_band) for s in result.sources
-    ]) * _UJY_PER_NMGY
-    prior_ujy = np.where(result.flux_quality, prior_ujy, np.nan)
-    result.fluxes_ujy[prior_band] = prior_ujy
-    result.flux_errs_ujy[prior_band] = np.where(
-        result.flux_quality, prior_err_ujy, np.nan)
-
-    nisp_targets = tuple(target_bands["euclid"])
-    if nisp_targets:
-        if verbose:
-            print(f"[7/7] NISP forced phot: {', '.join(nisp_targets)}")
-        nisp = fit_nisp_forced(
-            result.sources,
-            {b: cutouts[b] for b in nisp_targets},
-            {b: result.psf_stamps[b] for b in nisp_targets} if not persource_psf else None,
-            bands=nisp_targets,
-            psf_data=result.psf_data if persource_psf else None,
-            # The NISP mosaics share the prior-band 0.1 arcsec grid, so the
-            # prior fit's bright-star pixel veto carries over unchanged.
-            pixel_mask=result.prior_pixel_mask,
-            n_workers=n_workers,
-        )
-        # A diverged prior fit means an unreliable position/shape; NaN the
-        # propagated flux.
-        for b, d in nisp.items():
-            result.fluxes_ujy[b] = np.where(
-                result.flux_quality, d["flux_ujy"], np.nan)
-            result.flux_errs_ujy[b] = np.where(
-                result.flux_quality, d["flux_err_ujy"], np.nan)
-
+    _mask_bright_stars(run, result, parsed_coords)
+    tim_prior, n_report = _build_prior_models(run, result, parsed_coords)
+    _fit_prior(run, result, tim_prior, parsed_coords)
+    _fit_nisp(run, result)
     if calibrate_errors:
         # Runs after NISP so one pass covers prior + target bands; WISE
         # errors already carry the chi-inflation.
@@ -1010,51 +1264,10 @@ def run_forced_photometry(
             print("[7a] calibrate flux errors (empty-position point-source fits)")
         calibrate_result_errors(result, verbose=verbose)
 
-    wise_targets = tuple(target_bands["wise"])
-    if wise_targets:
-        if verbose:
-            print(f"[+] WISE forced phot: {', '.join(wise_targets)}")
-        wise_size = max(180.0, float(cutout_size_arcsec) + 120.0)
-        wise_cutouts = fetch_unwise_cutouts(
-            target_ra, target_dec, wise_size, data_dir=wise_dir,
-            force_download=force_download)
-        wise_psfs = {
-            "W1": get_wise_psf(1, wise_cutouts["coadd_id"], ra=target_ra, dec=target_dec),
-            "W2": get_wise_psf(2, wise_cutouts["coadd_id"], ra=target_ra, dec=target_dec),
-        }
-        result.wise_results = fit_wise_forced(
-            result.sources, wise_cutouts,
-            ra=target_ra, dec=target_dec,
-            cutout_size_arcsec=cutout_size_arcsec,
-            psf_stamps=wise_psfs, bands=wise_targets,
-            prior_cutout=result.cutouts[prior_band],
-            catalog_cache_dir=wise_dir / "catalogs")
-        for band in wise_targets:
-            if band in result.wise_results:
-                wflux = np.asarray(result.wise_results[band]["flux_ujy"], dtype=float)
-                werr = np.asarray(result.wise_results[band]["flux_err_ujy"], dtype=float)
-                # As for NISP: NaN where the prior fit diverged.
-                result.fluxes_ujy[band] = np.where(
-                    result.flux_quality, wflux, np.nan)
-                result.flux_errs_ujy[band] = np.where(
-                    result.flux_quality, werr, np.nan)
-
-    irac_targets = tuple(target_bands["irac"])
-    if irac_targets:
-        from .irac.pipeline import fit_irac_forced
-        if verbose:
-            print(f"[+] IRAC forced phot: {', '.join(irac_targets)}")
-        options = {"mosaic_backend": "seip", **(irac_options or {})}
-        result.irac_results = fit_irac_forced(
-            result.sources, target_ra, target_dec, cutout_size_arcsec,
-            irac_targets, data_dir=data_dir / "irac",
-            force_download=force_download, verbose=verbose, **options)
-        for band, r in result.irac_results.items():
-            # As for NISP and WISE: NaN where the prior fit diverged.
-            result.fluxes_ujy[band] = np.where(
-                result.flux_quality, r["flux_ujy"], np.nan)
-            result.flux_errs_ujy[band] = np.where(
-                result.flux_quality, r["flux_err_ujy"], np.nan)
+    _fit_wise(run, result)
+    _fit_irac(run, result, irac_options)
+    if ground_images:
+        _fit_ground(run, result, ground_images, ground_options)
 
     if n_report is not None and len(result.sources) > n_report:
         _drop_neighbour_rows(result, n_report)

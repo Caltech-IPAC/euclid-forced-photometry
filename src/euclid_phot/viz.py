@@ -8,6 +8,8 @@ from astropy.nddata import Cutout2D
 from astropy.stats import sigma_clipped_stats
 import astropy.units as u
 
+from .units import pixel_scale_arcsec
+
 
 def plot_workflow(ax=None, *, save_path=None):
     """Draw the forced-photometry pipeline as a labeled flow diagram.
@@ -95,17 +97,18 @@ def ujy_per_unit(cutout=None, *, band=None, mag_zero=None):
 
     MER images: ``10**(0.4 * (23.9 - MAGZERO))`` from the cutout header
     (or ``mag_zero``). unWISE (``band="W1"``/``"W2"``): Vega nanomaggies,
-    converted with the Vega-to-AB offsets of :mod:`euclid_phot.wise`.
+    converted with the Vega-to-AB offsets of :mod:`euclid_phot.wise.config`.
     """
+    from .units import AB_ZP_UJY, UJY_PER_NMGY
     if band in ("W1", "W2"):
-        from .wise import _UJY_PER_NMGY, _VEGA_OFFSET
-        return _UJY_PER_NMGY * 10 ** (-_VEGA_OFFSET[band] / 2.5)
+        from .wise.config import VEGA_OFFSET
+        return UJY_PER_NMGY * 10 ** (-VEGA_OFFSET[band] / 2.5)
     if mag_zero is None:
         header = getattr(cutout, "header", None)
         if header is None or "MAGZERO" not in header:
             raise ValueError("no MAGZERO; pass mag_zero")
         mag_zero = float(header["MAGZERO"])
-    return 10 ** (0.4 * (23.9 - float(mag_zero)))
+    return 10 ** (0.4 * (AB_ZP_UJY - float(mag_zero)))
 
 
 def add_colorbar(ax, image=None, label=None):
@@ -288,8 +291,8 @@ def show_psf_grid(grid: dict, *, cutout=None, mer_cat=None,
     CATALOG-PSF extraction it traces the source distribution.
 
     ``grid`` is the dict returned by
-    :func:`euclid_phot.psf.extract_grid_psf` (or
-    :func:`euclid_phot.psf.extract_catalog_psf`; the two share a schema).
+    :func:`euclid_phot.euclid.psf.extract_grid_psf` (or
+    :func:`euclid_phot.euclid.psf.extract_catalog_psf`; the two share a schema).
     Returns ``(fig, info)`` where ``info`` holds the FWHM statistics and
     the median spacing between neighboring stamps in arcsec.
     """
@@ -528,7 +531,7 @@ def _offset_frame(wcs, shape, ra, dec):
     """
     ny, nx = shape
     cx, cy = (nx - 1) / 2.0, (ny - 1) / 2.0
-    scale = wcs.proj_plane_pixel_scales()[0].to_value(u.arcsec)
+    scale = pixel_scale_arcsec(wcs)
     ra0, _ = wcs.pixel_to_world_values(cx, cy)
     ra1, _ = wcs.pixel_to_world_values(cx + 1, cy)
     sx = 1.0 if ((ra1 - ra0 + 180.0) % 360.0 - 180.0) > 0 else -1.0

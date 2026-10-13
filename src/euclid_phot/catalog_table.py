@@ -14,48 +14,18 @@ from __future__ import annotations
 
 import numpy as np
 
-_AB_ZP_UJY = 23.9
+from .sources import profile_radius_arcsec
+from .units import AB_ZP_UJY, flux_err_to_mag_err, flux_to_ab_mag
+
 _BAND_ORDER = ("VIS", "Y", "J", "H", "W1", "W2",
                "IRAC1", "IRAC2", "IRAC3", "IRAC4")
 
 
 def _model_re_arcsec(sources):
-    """Fitted effective radius (arcsec) per Tractor source; 0 for point
-    sources. ``FixedCompositeGalaxy`` takes the larger of its two
-    component radii."""
+    """Fitted effective radius (arcsec) per Tractor source; 0 for point sources."""
     if sources is None:
         return None
-    radii = np.zeros(len(sources))
-    for i, src in enumerate(sources):
-        shapes = [getattr(src, "shape", None)]
-        if shapes[0] is None:
-            shapes = [getattr(src, "shapeExp", None),
-                      getattr(src, "shapeDev", None)]
-        vals = []
-        for sh in shapes:
-            try:
-                vals.append(float(sh.re))
-            except (AttributeError, TypeError):
-                continue
-        radii[i] = max(vals) if vals else 0.0
-    return radii
-
-
-def flux_to_ab_mag(flux_ujy):
-    """AB magnitude from flux in microJansky. Non-positive flux -> nan."""
-    f = np.asarray(flux_ujy, dtype=float)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        m = _AB_ZP_UJY - 2.5 * np.log10(f)
-    return np.where(np.isfinite(f) & (f > 0), m, np.nan)
-
-
-def flux_err_to_mag_err(flux_ujy, flux_err_ujy):
-    """1-sigma magnitude error from flux and flux error (both microJansky)."""
-    f = np.asarray(flux_ujy, dtype=float)
-    e = np.asarray(flux_err_ujy, dtype=float)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        m_err = (2.5 / np.log(10.0)) * (e / f)
-    return np.where(np.isfinite(f) & (f > 0) & np.isfinite(e), m_err, np.nan)
+    return np.array([profile_radius_arcsec(src) for src in sources])
 
 
 def build_catalog(result, *, origin: str | None = None,
@@ -78,10 +48,10 @@ def build_catalog(result, *, origin: str | None = None,
         ``None`` skips them silently.
     with_flags : bool
         Add the quality flags: ``blended`` / ``n_neighbors`` /
-        ``nearest_arcsec`` (:func:`euclid_phot.flags.blend_flags`) and,
+        ``nearest_arcsec`` (:func:`euclid_phot.euclid.flags.blend_flags`) and,
         when the source list is star-classified, ``bright_star`` /
         ``near_bright_star`` / ``masked`` / ``edge`` / ``reliable``
-        (:func:`euclid_phot.flags.flag_sources`).
+        (:func:`euclid_phot.euclid.flags.flag_sources`).
     depth : bool
         Record the per-band 5-sigma equivalent of the median source error
         (``meta['depth_5sigma_ab']``), computed from the median reported
@@ -147,7 +117,7 @@ def build_catalog(result, *, origin: str | None = None,
         tab[f"mag_err_{b}_ab"] = flux_err_to_mag_err(flux, err) * u.mag
 
     tab.meta["flux_unit"] = "microJansky (AB)"
-    tab.meta["mag_zeropoint"] = f"AB, m = {_AB_ZP_UJY} - 2.5*log10(flux_uJy)"
+    tab.meta["mag_zeropoint"] = f"AB, m = {AB_ZP_UJY} - 2.5*log10(flux_uJy)"
     calib = getattr(result, "error_calibration", None) or {}
     error_origin = {}
     if any(b in result.fluxes_ujy for b in ("VIS", "Y", "J", "H")):
@@ -180,6 +150,12 @@ def build_catalog(result, *, origin: str | None = None,
             "Fitted amplitudes with unit-sum effective PRF stamps, multiplied "
             "by the IRAC Instrument Handbook core-PRF to infinite-aperture "
             "correction per channel.")
+    ground_results = getattr(result, "ground_results", None) or {}
+    if ground_results:
+        error_origin["/".join(ground_results)] = (
+            "formal Tractor inverse-variance from the supplied ground-image "
+            "uncertainty map; no empirical scaling, blend covariance, PSF or "
+            "calibration error")
     wise_results = getattr(result, "wise_results", None) or {}
     if wise_results:
         tab.meta["wise_psf_normalization"] = {
@@ -199,7 +175,7 @@ def build_catalog(result, *, origin: str | None = None,
             b: d.get("method", "") for b, d in calib.items()}
 
     if with_flags and n > 0:
-        from .flags import blend_flags, flag_sources, probable_bright_stars
+        from .euclid.flags import blend_flags, flag_sources, probable_bright_stars
         # Flag on the band that defined the source list; fall back to the
         # first band in canonical order if the prior band is not recorded.
         flag_band = (result.prior or {}).get("band")

@@ -1,4 +1,11 @@
-"""Fast spatial background estimation for IRAC mosaics."""
+"""Spatial sky background from SEP, shared by every band that needs one.
+
+IRAC mosaics and ground images keep a sky that varies across the field.
+:func:`estimate_sep_background` builds a smooth SEP map that is subtracted
+before the Tractor fit, so the source fluxes cannot absorb the sky.
+:func:`sep_valid_mask` optionally removes bright pixels from the estimate
+first (useful when scattered starlight should stay in the sky).
+"""
 
 from __future__ import annotations
 
@@ -6,6 +13,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import sep
+from scipy.stats import median_abs_deviation
 
 
 @dataclass(frozen=True)
@@ -83,3 +91,23 @@ def estimate_sep_background(
         filter_size=filter_size,
         constant=is_constant,
     )
+
+
+def sep_valid_mask(data: np.ndarray, valid_mask: np.ndarray,
+                   clip_mad: float) -> tuple[np.ndarray, float]:
+    """Exclude pixels above the median plus ``clip_mad`` median absolute
+    deviations (unscaled MAD) from the background estimate.
+
+    The mask is used only to estimate the sky, not as a Tractor pixel veto.
+    Returns ``(mask, threshold)``.
+    """
+    data = np.asarray(data)
+    valid = np.asarray(valid_mask, dtype=bool) & np.isfinite(data)
+    if data.ndim != 2 or valid.shape != data.shape or not np.any(valid):
+        raise ValueError("background image and valid mask need finite 2-D pixels")
+    if not np.isfinite(clip_mad) or clip_mad <= 0:
+        raise ValueError("background clip must be finite and positive")
+    values = data[valid]
+    mad = median_abs_deviation(values)
+    threshold = float(np.median(values) + clip_mad * mad)
+    return valid & (data <= threshold), threshold

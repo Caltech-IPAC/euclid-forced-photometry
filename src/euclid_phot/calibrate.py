@@ -13,8 +13,6 @@ import warnings
 
 import numpy as np
 
-_UJY_PER_NMGY = 3.631
-
 
 def draw_empty_positions(cutout, mer_cat=None, *,
                          n_positions: int = 200,
@@ -55,7 +53,7 @@ def draw_empty_positions(cutout, mer_cat=None, *,
     (ra, dec) : ndarray, ndarray
         Accepted positions in degrees.
     """
-    from .images import _invvar_from_rms
+    from .tractor_image import invvar_from_rms
 
     rng = np.random.default_rng(rng)
     data = np.asarray(cutout.data)
@@ -63,13 +61,13 @@ def draw_empty_positions(cutout, mer_cat=None, *,
     margin = min(int(edge_margin_pix), max(1, min(H, W) // 4))
 
     if cutout.rms is not None:
-        usable = _invvar_from_rms(cutout.rms, data) > 0
+        usable = invvar_from_rms(cutout.rms, data) > 0
     else:
         usable = np.isfinite(data)
     flag = getattr(cutout, "flag", None)
     if flag is not None:
         # Same default bad-bit policy as build_tractor_image.
-        from .config import mer_bad_bits_for_band
+        from .euclid.config import mer_bad_bits_for_band
         usable = usable & ((np.asarray(flag) & mer_bad_bits_for_band(cutout.band)) == 0)
 
     cat_ra = cat_dec = None
@@ -163,9 +161,9 @@ def measure_error_inflation(cutout, psf_stamp=None, mer_cat=None, *,
     """
     from astropy.stats import mad_std
 
-    from .fit import fit_forced_photometry
-    from .images import build_tractor_image
-    from .models import build_sources_from_coords
+    from .euclid.image import build_tractor_image
+    from .forced import fit_forced_photometry, fluxes_ujy
+    from .sources import build_sources_from_coords
 
     ra, dec = draw_empty_positions(
         cutout, mer_cat, n_positions=n_positions,
@@ -190,8 +188,7 @@ def measure_error_inflation(cutout, psf_stamp=None, mer_cat=None, *,
     # by construction.
     _, _, flux_err_ujy = fit_forced_photometry(
         tim, sources, band=band, flag_unphysical=False, return_errors=True)
-    flux_ujy = np.array(
-        [s.brightness.getFlux(band) for s in sources]) * _UJY_PER_NMGY
+    flux_ujy = fluxes_ujy(sources, band)
 
     ok = (np.isfinite(flux_ujy) & np.isfinite(flux_err_ujy)
           & (flux_err_ujy > 0))
@@ -264,10 +261,10 @@ def calibrate_result_errors(result, *,
     for band in euclid_present:
         invvar = None
         if result.prior_pixel_mask is not None:
-            from .images import _invvar_from_rms
+            from .tractor_image import invvar_from_rms
             cut = result.cutouts[band]
             invvar = np.where(result.prior_pixel_mask, 0.0,
-                              _invvar_from_rms(cut.rms, cut.data))
+                              invvar_from_rms(cut.rms, cut.data))
         info = measure_error_inflation(
             result.cutouts[band], result.psf_stamps.get(band), result.mer_cat,
             band=band, n_positions=n_positions,

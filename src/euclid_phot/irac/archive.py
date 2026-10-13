@@ -13,7 +13,7 @@ from astropy.coordinates import SkyCoord
 from astroquery.ipac.irsa import Irsa
 
 from .config import DEFAULT_PBCD_DIR, normalize_channel
-from .netutils import download_file, retry
+from ..netutils import download_file, retry
 
 
 SHA_COLLECTION = "spitzer_sha"
@@ -91,6 +91,7 @@ def discover_pbcd(
                  float(search_radius_arcsec) * u.arcsec),
             collection=SHA_COLLECTION,
         ),
+        exceptions=(Exception,),
         what="IRSA Spitzer PBCD discovery",
     )
     urls = sorted({str(value).strip() for value in rows["access_url"]})
