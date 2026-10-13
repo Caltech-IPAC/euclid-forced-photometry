@@ -18,8 +18,10 @@ from pathlib import Path
 # requests exceptions, which subclass OSError in requests>=2.
 _DEFAULT_EXCEPTIONS = (OSError, TimeoutError)
 
-# anon=True is required to read the public IRSA S3 bucket.
-S3_FSSPEC_KWARGS = {"anon": True}
+# anon=True is required to read the public IRSA S3 bucket. s3fs fetches whole
+# blocks of 50 MiB by default, so a header or a small section read would pull
+# 50 MB each; 1 MiB keeps byte-range reads close to what is actually needed.
+S3_FSSPEC_KWARGS = {"anon": True, "default_block_size": 1 << 20}
 
 
 def retry(fn, *, attempts=3, base_delay=2.0,
