@@ -1,38 +1,33 @@
 # Euclid forced photometry
 
-Forced photometry measures the fluxes of sources that are already known
-rather than detecting them again in each image. The source list and the
-model of each source come from one reference image, here Euclid VIS at
-0.1 arcsec per pixel. On every other image those models keep their
-positions and shapes, are convolved with that image's PSF, and only their
-fluxes are solved for. Neighbours are fitted together, so blended light in
-a low-resolution image is divided according to the VIS shapes, and a
-source too faint to detect in the target band still gets a flux and an
-error at its VIS position. The result is a catalog whose bands share one
-set of sources and one definition of flux, as needed for colours, SEDs and
-photometric redshifts.
+This repository is provided by the Euclid NASA Science Center at IPAC
+(ENSCI) as a reference implementation and tutorial for forced photometry
+with Euclid data. It is intended for the community working with the Euclid
+Quick Data Release
+([Euclid Collaboration: Aussel et al. 2025](https://arxiv.org/abs/2503.15302))
+and covers the cases most users encounter: Euclid NISP with a VIS prior,
+the mid-infrared with unWISE and Spitzer/IRAC, ground-based images supplied
+by the user, and photometry at user-defined coordinates.
+
+Forced photometry measures the fluxes of known sources instead of
+detecting them anew in each image. The source list and the model of each
+source come from Euclid VIS at 0.1 arcsec per pixel, from the MER catalog
+([Euclid Collaboration: Romelli et al. 2025](https://arxiv.org/abs/2503.15305))
+or from coordinates the user supplies. On every other image those models
+keep their positions and shapes, are convolved with that image's PSF, and
+only their fluxes are solved for, neighbours together. Blended light is
+thus divided according to the VIS shapes, a source too faint to detect in
+the target band still receives a flux and an error, and every band shares
+one set of sources and one definition of flux, as needed for colours, SEDs
+and photometric redshifts.
 
 The fitting engine is [The Tractor](https://github.com/dstndstn/tractor)
-([Lang, Hogg & Mykytyn 2016](https://ascl.net/1604.008)). It renders a
-parametric model of each source (point source, exponential, de Vaucouleurs,
-Sérsic or composite) through the image's PSF and WCS into pixels, and
-optimises the parameters against the data weighted by their inverse
-variance. Forced photometry is the case where positions and shapes are frozen
-and the fluxes form a linear problem; this is how the Tractor produced WISE
-fluxes for SDSS sources ([Lang, Hogg & Schlegel 2016](https://arxiv.org/abs/1410.7397)).
-
-This package applies that recipe to the Euclid Quick Data Release
-([Euclid Collaboration: Aussel et al. 2025](https://arxiv.org/abs/2503.15302)).
-The sources come from the MER catalog
-([Euclid Collaboration: Romelli et al. 2025](https://arxiv.org/abs/2503.15305)),
-or from a list of coordinates you supply, and their profiles are fitted on
-VIS. Those profiles are then forced onto Euclid NISP Y, J and H, unWISE W1
-and W2, Spitzer/IRAC channels 1 to 4, and any ground-based image you have.
-
-The package is meant for learning the method and for exploratory analysis.
-It shows its diagnostics and includes a few validation tests, but the PSF,
-the residuals, the source list and the error assumptions still have to be
-checked on your own science sample.
+([Lang, Hogg & Mykytyn 2016](https://ascl.net/1604.008)), used as it was
+for the WISE photometry of SDSS sources
+([Lang, Hogg & Schlegel 2016](https://arxiv.org/abs/1410.7397)). The
+material is meant for learning the method and for exploratory analysis;
+the PSF, the residuals, the source list and the error assumptions must
+still be checked on each science sample before the measurements are used.
 
 ## Notebooks
 
@@ -121,43 +116,6 @@ the PSF, bright-star masks and error calibration, are described in
 IRAC, your own image and supplied coordinates. The same fit is available
 from the command line as `euclid-phot run --help`.
 
-## Computing cost
-
-Most of the memory goes to the VIS model selection that starts every
-`run_forced_photometry` call with `"model_selection": "tree"`. Its memory
-grows faster than the field area, and each extra worker adds to it. The
-fits that follow (VIS fluxes, NISP, unWISE, IRAC) need a few GB.
-
-Measured on the field of [notebook 03](notebooks/03_irac_forced_photometry.ipynb)
-(EDF-F, VIS models fitted to unWISE and IRAC) on a Mac Studio with an
-Apple M3 Ultra (28 cores, 96 GB):
-
-| Field | Sources | `n_workers` | Run time | Peak memory |
-|---|---|---|---|---|
-| 200″, VIS models only | 856 | 10 | 1 min | 26 GB |
-| 200″ | 856 | 10 | 6 min | 26 GB |
-| 200″ | 856 | 1 | 10 min | 16 GB |
-| 300″ | 1953 | 10 | 17 min | 77 GB |
-
-Peak memory includes the worker processes. Run time also depends on the
-processor. Notebooks 01 and 02 run the same model selection on 200″ fields
-and were not measured separately; the 50″ examples in notebooks 05 and 06
-are much smaller.
-
-A Jupyter kernel that runs out of memory stops without a traceback. For
-fields larger than about 200″:
-
-- Run the fit as a Python script rather than in a notebook, and put it
-  under `if __name__ == "__main__":`. Model selection starts worker
-  processes, and on macOS each one re-imports the script.
-- Or split the field into tiles of at most 200″, fit each with a margin of
-  at least 20″ on every side, and keep from each tile only the sources
-  inside its unpadded core. Peak memory then stays at the single-tile
-  level, and the margin keeps kept sources away from tile edges.
-
-A field that crosses a MER tile boundary needs separate tile fits in any
-case.
-
 ## Interpreting results
 
 A fit returns a result object, and `result.to_table()` turns it into one
@@ -209,6 +167,51 @@ fit's own PSF into real backgrounds and measures them again. That checks
 that rendering and recovery agree with each other; it says nothing about
 the real PSF, galaxy morphology, detection completeness or the uncertainty
 terms listed above. The notebook states what it does and does not cover.
+
+## Computing cost
+
+Forced photometry on Euclid data at the scale of these notebooks does not
+need a cluster. Every example runs on a single machine. A 200-arcsec field
+of about 850 sources, the size used in notebooks 01 to 03, takes about ten
+minutes with one worker process and 16 GB of memory, or six minutes and
+26 GB with ten workers, on a workstation. The 50-arcsec examples of
+notebooks 05 and 06 are far smaller. Larger areas are fitted as tiles, so
+the cost of a wide run grows with the number of tiles, not with the field
+size.
+
+Memory is set by the VIS model selection that opens every
+`run_forced_photometry` call with `"model_selection": "tree"`. It grows
+faster than the field area, and each extra worker adds to it, while the
+fits that follow (VIS fluxes, NISP, unWISE, IRAC) need a few GB and take
+most of the time. Measured on the field of
+[notebook 03](notebooks/03_irac_forced_photometry.ipynb) (EDF-F, VIS
+models fitted to unWISE and IRAC) on a Mac Studio with an Apple M3 Ultra
+(28 cores, 96 GB):
+
+| Field | Sources | `n_workers` | Run time | Peak memory |
+|---|---|---|---|---|
+| 200″, VIS models only | 856 | 10 | 1 min | 26 GB |
+| 200″ | 856 | 10 | 6 min | 26 GB |
+| 200″ | 856 | 1 | 10 min | 16 GB |
+| 300″ | 1953 | 10 | 17 min | 77 GB |
+
+Peak memory includes the worker processes. Run time also depends on the
+processor. Notebooks 01 and 02 run the same model selection on 200″ fields
+and were not measured separately.
+
+A Jupyter kernel that runs out of memory stops without a traceback. For
+fields larger than about 200″:
+
+- Run the fit as a Python script rather than in a notebook, and put it
+  under `if __name__ == "__main__":`. Model selection starts worker
+  processes, and on macOS each one re-imports the script.
+- Or split the field into tiles of at most 200″, fit each with a margin of
+  at least 20″ on every side, and keep from each tile only the sources
+  inside its unpadded core. Peak memory then stays at the single-tile
+  level, and the margin keeps kept sources away from tile edges.
+
+A field that crosses a MER tile boundary needs separate tile fits in any
+case.
 
 ## How the package is organised
 
