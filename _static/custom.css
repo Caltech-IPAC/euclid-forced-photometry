@@ -1,0 +1,24 @@
+/* The ENSCI logo lives in the navbar's end slot so that it can link to the
+   ENSCI site while the title links to the README. Match the height the theme
+   gives its own logo, show the slot at every screen width, and drop the
+   external-link icon the theme appends to the link. */
+.myst-navbar-end {
+  display: flex !important;
+}
+.myst-navbar-end a.link {
+  display: flex;
+  align-items: center;
+  margin-right: 0.75rem;
+}
+.myst-navbar-end .link-text {
+  display: flex;
+  align-items: center;
+}
+.myst-navbar-end img {
+  height: 2.25rem;
+  width: auto;
+  margin: 0;
+}
+.myst-navbar-end .link-icon {
+  display: none;
+}

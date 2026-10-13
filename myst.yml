@@ -35,12 +35,12 @@ site:
   options:
     folders: true
     hide_authors: true
-    logo: _static/ensci_logo.png
-    logo_alt: ENSCI, the Euclid NASA Science Center at IPAC
-    logo_url: https://euclid.caltech.edu/
     logo_text: Euclid forced photometry
     favicon: _static/ensci_logo.png
+    style: _static/custom.css
   parts:
+    navbar_end: |
+      [![ENSCI, the Euclid NASA Science Center at IPAC](_static/ensci_logo.png)](https://euclid.caltech.edu/)
     primary_sidebar_footer: |
       Euclid NASA Science Center at IPAC (ENSCI)
     footer: |
