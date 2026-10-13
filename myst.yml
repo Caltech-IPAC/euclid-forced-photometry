@@ -5,16 +5,9 @@ project:
   title: Euclid forced photometry
   github: https://github.com/Caltech-IPAC/euclid-forced-photometry
   authors:
-    - name: Nima Chartab
-      affiliation: ensci
-    - name: Shoubaneh Hemmati
-      affiliation: ensci
-    - name: Ian Lin
-      affiliation: ensci
-  affiliations:
-    - id: ensci
-      name: Euclid NASA Science Center at IPAC (ENSCI)
-      institution: Caltech/IPAC
+    - Nima Chartab
+    - Shoubaneh Hemmati
+    - Ian Lin
   copyright: "2026 Euclid NASA Science Center at IPAC"
   exclude:
     - .anet/**
@@ -41,6 +34,7 @@ site:
   template: book-theme
   options:
     folders: true
+    hide_authors: true
     logo: _static/ensci_logo.png
     logo_alt: ENSCI, the Euclid NASA Science Center at IPAC
     logo_url: https://euclid.caltech.edu/
@@ -51,4 +45,3 @@ site:
       Euclid NASA Science Center at IPAC (ENSCI)
     footer: |
       Maintained by the [Euclid NASA Science Center at IPAC (ENSCI)](https://euclid.caltech.edu/).
-      Contributors: Nima Chartab, Shoubaneh Hemmati, Ian Lin.
