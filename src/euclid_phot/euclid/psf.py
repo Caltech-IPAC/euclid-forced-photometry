@@ -131,7 +131,7 @@ def extract_catalog_psf(band: str, ra: float, dec: float,
     # Byte-range reads: HDU[2] (small stamp catalog) in full, then one
     # hdu.section read of the nearby-stamp bounding box from HDU[1]
     # (~1-2 MB instead of the 200-500 MB file).
-    from ..netutils import S3_FSSPEC_KWARGS, retry
+    from ..netutils import S3_FSSPEC_KWARGS, read_s3_image_section, retry
     with retry(lambda: fits.open(f"s3://{s3_path}", use_fsspec=True,
                                  fsspec_kwargs=S3_FSSPEC_KWARGS),
                what=f"S3 open CATALOG-PSF {band}") as hdul:
@@ -174,7 +174,7 @@ def extract_catalog_psf(band: str, ra: float, dec: float,
         x1 = min(img_w, int(xc.max()) + half + 1)
         y0 = max(0, int(yc.min()) - half)
         y1 = min(img_h, int(yc.max()) + half + 1)
-        img_chunk = np.asarray(hdul[1].section[y0:y1, x0:x1])
+        img_chunk = read_s3_image_section(hdul[1], (slice(y0, y1), slice(x0, x1)), s3_path)
 
         stamps, keep_idx = [], []
         for i in range(len(nearby)):
@@ -278,7 +278,7 @@ def extract_grid_psf(band: str, ra: float, dec: float,
         s3_path = _resolve_grid_psf_s3(band, products, tile_id)
 
     # Same byte-range strategy as extract_catalog_psf.
-    from ..netutils import S3_FSSPEC_KWARGS, retry
+    from ..netutils import S3_FSSPEC_KWARGS, read_s3_image_section, retry
     with retry(lambda: fits.open(f"s3://{s3_path}", use_fsspec=True,
                                  fsspec_kwargs=S3_FSSPEC_KWARGS),
                what=f"S3 open GRID-PSF {band}") as hdul:
@@ -329,7 +329,7 @@ def extract_grid_psf(band: str, ra: float, dec: float,
         x1 = min(img_w, int(xc.max()) + half + 1)
         y0 = max(0, int(yc.min()) - half)
         y1 = min(img_h, int(yc.max()) + half + 1)
-        img_chunk = np.asarray(hdul[1].section[y0:y1, x0:x1])
+        img_chunk = read_s3_image_section(hdul[1], (slice(y0, y1), slice(x0, x1)), s3_path)
 
         stamps, keep = [], []
         for i in range(len(xc)):

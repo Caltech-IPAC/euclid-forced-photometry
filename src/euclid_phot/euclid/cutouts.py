@@ -27,6 +27,7 @@ from astropy.wcs import WCS
 from astroquery.ipac.irsa import Irsa
 from astropy.wcs.utils import proj_plane_pixel_scales
 
+from ..netutils import read_s3_image_section
 from .config import (
     DEFAULT_CUTOUT_DIR,
     MER_COLLECTION,
@@ -189,7 +190,8 @@ class _TileCoverageError(ValueError):
 
 def _single_tile_cutout(tile, ra, dec, size_arcsec, mosaic_cache_dir):
     """Read an exact native pixel rectangle, preserving the delivered PSF."""
-    hdul_ctx, _ = _open_mosaic(tile["s3"], mosaic_cache_dir)
+    hdul_ctx, origin = _open_mosaic(tile["s3"], mosaic_cache_dir)
+    s3_path = tile["s3"] if origin.startswith("s3") else None
     with hdul_ctx as hdul:
         for hdu in hdul:
             if getattr(hdu, "shape", None) is None or len(hdu.shape) != 2:
@@ -207,7 +209,7 @@ def _single_tile_cutout(tile, ra, dec, size_arcsec, mosaic_cache_dir):
                     "Use a smaller field or separate tile fits. Resampling multiple "
                     "tiles also requires transforming their PSFs and noise model."
                 ) from exc
-            data = np.asarray(hdu.section[slices]).copy()
+            data = read_s3_image_section(hdu, slices, s3_path)
             header = hdu.header.copy()
             header["MERTILE"] = str(tile["tile_id"])
             header["NATIVE"] = (True, "Native MER pixels; no extra resampling")
