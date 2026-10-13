@@ -628,6 +628,46 @@ def show_fit(result, bands=("VIS",), *, ra=None, dec=None, size_arcsec=50.0,
     return fig, axes
 
 
+def show_source_cutouts(result, positions, *, band="VIS", size_arcsec=6.0,
+                        labels=None, vmax_percentile=99.5):
+    """Data, model and residual of one band around each given position.
+
+    ``positions`` is a sequence of ``(ra, dec)`` pairs, one row per
+    position; ``labels`` annotates the rows. Data and model share one
+    scale per row, and the residual uses the same absolute scale,
+    symmetric about zero.
+    """
+    images = result.image_set(band)
+    positions = np.atleast_2d(np.asarray(positions, dtype=float))
+    n = len(positions)
+    fig, axes = plt.subplots(n, 3, figsize=(10.5, 3.3 * n), squeeze=False)
+    for row, (ra, dec) in enumerate(positions):
+        panels = {}
+        for kind in ("data", "model", "residual"):
+            panels[kind], cut_wcs = _sky_cutout(images[kind], images["wcs"],
+                                                ra, dec, size_arcsec)
+        _, extent = _offset_frame(cut_wcs, panels["data"].shape, ra, dec)
+        vmax = _positive_vmax(panels["data"], vmax_percentile)
+        for col, kind in enumerate(("data", "model", "residual")):
+            ax = axes[row, col]
+            residual = kind == "residual"
+            shown = ax.imshow(panels[kind], origin="lower", extent=extent,
+                              cmap="RdBu_r" if residual else "gray_r",
+                              vmin=-vmax if residual else 0.0, vmax=vmax)
+            if row == 0:
+                ax.set_title(f"{band} {kind}", fontsize=13)
+            if row == n - 1:
+                ax.set_xlabel("RA offset (arcsec)")
+            if col == 0:
+                label = f"{labels[row]}\n" if labels is not None else ""
+                ax.set_ylabel(label + "Dec offset (arcsec)")
+            cbar = fig.colorbar(shown, ax=ax, fraction=0.046, pad=0.04)
+            if images.get("unit"):
+                cbar.set_label(images["unit"])
+    fig.tight_layout()
+    return fig, axes
+
+
 def show_dawn_comparison(comparisons):
     """Pipeline versus DAWN flux for the selected sample of each channel."""
     fig, axes = plt.subplots(1, len(comparisons),

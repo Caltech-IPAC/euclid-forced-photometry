@@ -195,6 +195,7 @@ def run_injection_recovery(*,
                            verbose: bool = False,
                            return_result: bool = False,
                            injection_psf_product: str = "grid",
+                           model_selection: str = "prior",
                            **run_kwargs):
     """Run the full injection-recovery test on a (cached) field.
 
@@ -214,6 +215,11 @@ def run_injection_recovery(*,
 
     ``rng`` defaults to a fixed seed for reproducibility; pass fresh entropy
     for independent realizations.
+
+    ``model_selection`` is the VIS prior path: ``'prior'`` builds each
+    injected source from its truth row (a point source, or the injected
+    Sersic shape), ``'tree'`` lets the model-selection tree choose and fit
+    the profile from the pixels as it does for real sources.
 
     ``injection_psf_product`` selects ``'grid'`` or ``'catalog'`` for the
     added signal. Recovery uses the same product unless ``psf_product``
@@ -272,7 +278,8 @@ def run_injection_recovery(*,
 
     result = run_forced_photometry(
         target_ra, target_dec, cutout_size_arcsec,
-        prior={"band": prior_band, "objects": "mer"},
+        prior={"band": prior_band, "objects": "mer",
+               "model_selection": model_selection},
         target_bands={"euclid": tuple(b for b in bands if b != prior_band),
                       "wise": ()},
         data_dir=data_dir,
