@@ -32,10 +32,11 @@ still be checked on each science sample before the measurements are used.
 ## Notebooks
 
 - [00: Modeling a galaxy with the Tractor](notebooks/00_how_tractor_works.ipynb): one galaxy,
-  with image construction, model parameters and optimization written out.
+  with image construction, model parameters and optimization written out on VIS, then its
+  flux forced in NISP H with the VIS shape held fixed.
 - [01: Forced photometry on Euclid NISP with a VIS prior](notebooks/01_nisp_forced_photometry.ipynb):
-  a 200-arcsec field in EDF-N, source models on VIS, forced fluxes in Y, J and H,
-  residuals and catalog checks.
+  a 200-arcsec field in EDF-N, source models on VIS, forced fluxes in Y, J and H
+  (the H fit written out step by step), residuals and catalog checks.
 - [02: Forced photometry on unWISE W1 and W2](notebooks/02_wise_forced_photometry.ipynb):
   the same field on unWISE W1 and W2, with residuals and a catalog cross-check.
 - [03: Forced photometry on Spitzer/IRAC](notebooks/03_irac_forced_photometry.ipynb):
@@ -50,7 +51,8 @@ still be checked on each science sample before the measurements are used.
 - [06: Photometry at supplied coordinates](notebooks/06_photometry_at_coordinates.ipynb):
   photometry at user positions without a MER source list.
 - [Supporting: Model selection](notebooks/supporting_notebooks/model_selection.ipynb):
-  the profile trials for one pair of neighbouring sources.
+  why the MER models are refitted, the profile trials for one pair of neighbouring
+  sources, and the tree against the MER models over a 50-arcsec field.
 - [Supporting: Injection and recovery](notebooks/supporting_notebooks/injection_recovery.ipynb):
   matching-PSF point-source checks on real backgrounds.
 
@@ -106,7 +108,10 @@ The field comes first, as its centre and the side of the square cutout.
 The `prior` argument says where the source models come from: here the MER
 catalog, with the profile class of each source chosen on the VIS pixels by
 the model-selection tree (`"model_selection": "prior"` keeps the MER
-classification instead). The `target_bands` argument lists the bands to
+classification instead). The models can also be built on a NISP band,
+`prior={"band": "H", "objects": "mer"}`, which refits the MER shapes on H;
+the tree and the STARSIGNAL star mask need VIS, and notebook 02 compares
+the two for unWISE. The `target_bands` argument lists the bands to
 measure; unWISE and IRAC bands go in their own groups, and a ground-based
 image is passed separately as `ground_images`. The source list can also be
 your own coordinates, passed as `user_coords`. The remaining options, for
@@ -138,19 +143,27 @@ metadata also gives, per band, the AB magnitude at five times the median
 error (`depth_5sigma_ab`); that is a summary of the errors, not a measured
 detection or completeness limit.
 
-The method assumes that every band shares the VIS morphology, which fails
-for sources with colour gradients or with emission seen only in the
-infrared. The residuals show where this happens, so they should be
-inspected; `result.image_set(band)` returns the data, model and residual
-images of the prior band and of every WISE and IRAC band. Notebook 01
+The method assumes that every band shares the morphology measured in the
+prior band, VIS by default or a NISP band when `prior["band"]` says so.
+That assumption fails for sources with colour gradients or with emission
+seen only at longer wavelengths. A NISP prior is closer in wavelength to
+unWISE and IRAC, but its wider PSF measures small and blended shapes less
+well; on the field of notebook 02 the choice changed most unWISE fluxes
+by a few percent or less, with no systematic shift for red sources, and
+for the sources that changed by more the unWISE pixels could not tell
+which models were right; treat that difference as a systematic error.
+Either way the residuals show where the assumption fails, so they should
+be inspected; `result.image_set(band)` returns the data, model and
+residual images of every band measured. Notebook 01
 shows a few-percent difference between the NISP fluxes and the MER catalog
 that we left in place rather than tune the PSF until the catalogs agree.
-In the WISE and IRAC bands, where several VIS sources fall inside one PSF,
-the fluxes also depend on the PSF shape and on the completeness of the
-source list. The WISE fit adds unWISE catalog sources outside the field to
-account for their light; the IRAC fit models only the VIS sources inside
-the field, so IRAC fluxes within a few arcsec of the edge can absorb light
-from outside. Request a slightly larger field when the edge matters.
+In the WISE and IRAC bands, where several prior-band sources fall inside
+one PSF, the fluxes also depend on the PSF shape and on the completeness
+of the source list. The WISE fit adds unWISE catalog sources outside the
+field to account for their light; the IRAC fit models only the sources
+of the prior image inside the field, so IRAC fluxes within a few arcsec
+of the edge can absorb light from outside. Request a slightly larger field
+when the edge matters.
 
 The catalog comparisons in the notebooks are cross-checks, not
 calibrations. The
@@ -215,15 +228,15 @@ case.
 
 ## How the package is organised
 
-The source models are decided once, on VIS: the profile class and shape of
-each source come either from the MER catalog or from the model-selection
-tree, with an optional pass that frees the shapes and refines the positions
+The source models are decided once, on the prior band (VIS by default, or
+a NISP band): the profile class and shape of each source come either from
+the MER catalog or, on VIS, from the model-selection tree, with an optional pass that frees the shapes and refines the positions
 (`selection/`, `forced.fit_free_shapes`, `forced.refine_positions`).
 Every other band then runs the same core recipe on those models:
 
 1. build the band's Tractor image: data, inverse variance, PSF, WCS and the
    photometric scale (`tractor_image.make_tractor_image`);
-2. copy the VIS source models into the band, positions and shapes kept
+2. copy the prior-band source models into the band, positions and shapes kept
    (`sources.clone_sources`);
 3. freeze everything but the fluxes and solve (`forced.flux_tractor`,
    `forced.solve_fluxes`);
@@ -260,7 +273,7 @@ top of the package, with `units`, `pixel_psf`, `background` and `scene`.
 Each band folder holds only what is its own: `euclid/` (MER catalog, cutouts, PSF products, NISP), `wise/`
 (unWISE coadds, PSF, catalog neighbours), `irac/` (Spitzer mosaics and the
 effective PRF) and `ground_based/` (a user's image, its WCS and PSF checks).
-Notebooks 02-04 run the recipe step by step for one band before calling the
+Notebooks 01-04 run the recipe step by step for one band before calling the
 band's one-line fit.
 
 Every push runs a check on GitHub (`.github/workflows/ci.yml`): the install

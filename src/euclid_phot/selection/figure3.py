@@ -93,7 +93,7 @@ def reproduce_figure3(
     axes[0, 0].set_title(f"VIS data  (±{vlim_sigma:.0f}σ, σ={sigma * k:.3g})", fontsize=13)
     axes[0, 1].imshow(crop(final.residual) * k,
                        origin="lower", cmap=cmap_img, norm=norm_lin)
-    axes[0, 1].set_title(f"Final residual  (±{vlim_sigma:.0f}σ)", fontsize=13)
+    axes[0, 1].set_title(f"VIS final residual  (±{vlim_sigma:.0f}σ)", fontsize=13)
 
     for r, rec in enumerate(history.stages, start=1):
         mod = crop(rec.model_image) * k
@@ -104,10 +104,10 @@ def reproduce_figure3(
 
         axes[r, 0].imshow(mod_clip, origin="lower", cmap=cmap_mod, norm=norm_log)
         axes[r, 0].set_title(f"src#{rec.source_idx} = {rec.model_name}{check}\n"
-                              f"(joint blob model)", fontsize=12,
+                              f"(joint VIS model)", fontsize=12,
                               color=title_color)
         axes[r, 1].imshow(res, origin="lower", cmap=cmap_img, norm=norm_lin)
-        axes[r, 1].set_title(f"joint residual   χ²ν(src#{rec.source_idx}) = "
+        axes[r, 1].set_title(f"VIS joint residual   χ²ν(src#{rec.source_idx}) = "
                               f"{rec.chi2_red:.2f}", fontsize=12,
                               color=title_color)
 

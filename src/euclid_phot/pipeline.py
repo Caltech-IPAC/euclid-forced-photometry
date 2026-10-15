@@ -345,6 +345,10 @@ class ForcedPhotometryResult:
     flux_errs_ujy: dict = field(default_factory=dict)     # band -> ndarray (1-sigma)
     flux_quality: np.ndarray | None = None
     chosen_models: list | None = None
+    # band -> fit_nisp_forced output: fluxes as fitted, before the NaN of a
+    # failed prior fit, aligned with sources + neighbour_sources; image_set
+    # renders the NISP models from them.
+    nisp_results: dict | None = None
     wise_results: dict | None = None
     irac_results: dict | None = None
     ground_results: dict | None = None
@@ -376,8 +380,9 @@ class ForcedPhotometryResult:
     def image_set(self, band: str) -> dict:
         """Data, model, residual and invvar images and WCS for one band.
 
-        Available for the prior band (the model is rendered from the
-        fitted sources), and for every fitted WISE and IRAC band. Images are
+        Available for the prior band and every fitted NISP band (the model
+        is rendered from the fitted sources), and for every fitted WISE,
+        IRAC and ground band. Images are
         in microJansky per pixel and ``invvar`` in 1/(microJansky/pixel)^2.
         Ground images are on their own pixel grid.
         """
@@ -394,10 +399,18 @@ class ForcedPhotometryResult:
                         "residual": r["residual"] * f,
                         "invvar": r["invvar"] / f**2,
                         "wcs": r["wcs"], "unit": UJY_PER_PIXEL}
-        if band != self.prior.get("band"):
+        sources = list(self.sources) + list(self.neighbour_sources)
+        if self.nisp_results and band in self.nisp_results:
+            # The prior-band models with the fluxes fitted in this band.
+            from .sources import clone_sources
+            from .units import UJY_PER_NMGY
+            fitted = np.asarray(self.nisp_results[band]["flux_ujy"], float)
+            sources = clone_sources(sources, band,
+                                    seed_nmgy=np.nan_to_num(fitted) / UJY_PER_NMGY)
+        elif band != self.prior.get("band"):
             raise ValueError(
                 f"no images for {band!r}; available: the prior band "
-                f"{self.prior.get('band')!r} and the WISE/IRAC/ground bands fitted")
+                f"{self.prior.get('band')!r} and the NISP/WISE/IRAC/ground bands fitted")
         from tractor import Tractor
         cutout = self.cutouts[band]
         persource = self.psf_mode == 'nearest-source-position'
@@ -405,7 +418,6 @@ class ForcedPhotometryResult:
             cutout, self.psf_stamps.get(band),
             psf_data=self.psf_data.get(band) if persource else None,
             pixel_mask=self.prior_pixel_mask)
-        sources = list(self.sources) + list(self.neighbour_sources)
         f = ujy_per_unit(cutout)
         model = np.asarray(Tractor([tim], sources).getModelImage(0)) * f
         data = np.asarray(tim.getImage()) * f
@@ -900,6 +912,7 @@ def _fit_nisp(run, result):
             pixel_mask=result.prior_pixel_mask,
             n_workers=n_workers,
         )
+        result.nisp_results = nisp
         # A diverged prior fit means an unreliable position/shape; NaN the
         # propagated flux.
         for b, d in nisp.items():

@@ -14,6 +14,12 @@
   display: flex;
   align-items: center;
 }
+/* The theme gives a picture in article content a 2rem vertical margin. In the
+   navbar that doubles the bar's height, so a heading reached from the outline
+   lands underneath it. */
+.myst-navbar-end picture {
+  margin: 0;
+}
 .myst-navbar-end img {
   height: 2.25rem;
   width: auto;
