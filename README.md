@@ -149,7 +149,9 @@ That assumption fails for sources with colour gradients or with emission
 seen only at longer wavelengths. A NISP prior is closer in wavelength to
 unWISE and IRAC, but its wider PSF measures small and blended shapes less
 well; on the field of notebook 02 the choice changed most unWISE fluxes
-by a few percent or less, with no systematic shift for red sources.
+by a few percent or less, with no systematic shift for red sources, and
+for the sources that changed by more the unWISE pixels could not tell
+which models were right; treat that difference as a systematic error.
 Either way the residuals show where the assumption fails, so they should
 be inspected; `result.image_set(band)` returns the data, model and
 residual images of every band measured. Notebook 01
