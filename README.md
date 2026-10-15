@@ -299,3 +299,8 @@ with the detector PRFs and flux corrections of the
 IRAC extinction coefficients are from
 [Indebetouw et al. (2005)](https://ui.adsabs.harvard.edu/abs/2005ApJ...619..931I).
 Please cite the relevant survey and method papers when using their data or methods.
+
+## Authors
+
+Nima Chartab, Shoubaneh Hemmati and Ian Lin, Euclid NASA Science Center at
+IPAC (ENSCI).

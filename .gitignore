@@ -25,3 +25,6 @@ dist/
 /photometry.csv
 /photometry.ecsv
 
+
+# Jupyter Book output
+_build/

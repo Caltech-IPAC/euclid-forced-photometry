@@ -1,0 +1,45 @@
+# Jupyter Book (MyST) configuration. The site is built from the notebooks
+# as committed, with their saved outputs; nothing is executed at build time.
+version: 1
+project:
+  title: Euclid forced photometry
+  github: https://github.com/Caltech-IPAC/euclid-forced-photometry
+  authors:
+    - Nima Chartab
+    - Shoubaneh Hemmati
+    - Ian Lin
+  copyright: "2026 Euclid NASA Science Center at IPAC"
+  exclude:
+    - .anet/**
+    - .unwise_psf/**
+    - examples/**
+    - src/**
+    - scripts/**
+  toc:
+    - file: README.md
+    - file: notebooks/00_how_tractor_works.ipynb
+    - file: notebooks/01_nisp_forced_photometry.ipynb
+    - file: notebooks/02_wise_forced_photometry.ipynb
+    - file: notebooks/03_irac_forced_photometry.ipynb
+    - file: notebooks/04_ground_based_forced_photometry.ipynb
+    - file: notebooks/05_one_call.ipynb
+    - file: notebooks/06_photometry_at_coordinates.ipynb
+    - title: Supporting notebooks
+      children:
+        - file: notebooks/supporting_notebooks/model_selection.ipynb
+        - file: notebooks/supporting_notebooks/injection_recovery.ipynb
+site:
+  template: book-theme
+  options:
+    folders: true
+    hide_authors: true
+    logo_text: Euclid forced photometry
+    favicon: _static/ensci_logo.png
+    style: _static/custom.css
+  parts:
+    navbar_end: |
+      [![ENSCI, the Euclid NASA Science Center at IPAC](_static/ensci_logo.png)](https://euclid.caltech.edu/)
+    primary_sidebar_footer: |
+      Euclid NASA Science Center at IPAC (ENSCI)
+    footer: |
+      Maintained by the [Euclid NASA Science Center at IPAC (ENSCI)](https://euclid.caltech.edu/).
