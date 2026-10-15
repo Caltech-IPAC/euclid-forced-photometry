@@ -30,6 +30,7 @@ def _vis_on_ground(vis_cutout, image):
 def show_inputs(inputs):
     """Science, RMS and normalized PSF with colorbars and angular scale."""
     image = inputs.image
+    label = image.band or "ground"
     valid = image.invvar_ujy > 0
     area = pixel_area_arcsec2(image.wcs)
     display = image.science_ujy / area
@@ -40,11 +41,11 @@ def show_inputs(inputs):
     extent = (0, nx * scale, 0, ny * scale)
     fig, axes = plt.subplots(1, 3, figsize=(14, 4))
     for ax, data, title, label, cmap, lim, im_extent in (
-        (axes[0], display, "Science", "µJy/arcsec²", "gray",
+        (axes[0], display, f"{label} science", "µJy/arcsec²", "gray",
          (-_display_scale(display) / 10, _display_scale(display)), extent),
-        (axes[1], rms, "Uncertainty", "µJy/arcsec²", "viridis",
+        (axes[1], rms, f"{label} uncertainty", "µJy/arcsec²", "viridis",
          (None, None), extent),
-        (axes[2], image.psf, "Supplied PSF", "PSF fraction", "magma",
+        (axes[2], image.psf, f"{label} PSF", "PSF fraction", "magma",
          (None, None), None),
     ):
         artist = ax.imshow(data, origin="lower", cmap=cmap,
@@ -233,12 +234,12 @@ def show_fit_cutouts(fit, vis_cutout, *, size_arcsec=20.0, n_sources=3,
             raise ValueError("vmin must be smaller than the display vmax")
         extent = (-(half+.5)*scale, (half+.5)*scale,
                   -(half+.5)*scale, (half+.5)*scale)
-        panels = ((cutout(vis_aligned, xi, yi), "VIS", lo, hi),
-                  (ground, "Ground based", lo, hi),
-                  (model, "Tractor", lo, hi),
-                  (resid, "Residual", -.2*hi, .2*hi))
+        panels = ((cutout(vis_aligned, xi, yi), "VIS data", lo, hi),
+                  (ground, f"{band} data", lo, hi),
+                  (model, f"{band} model (VIS shapes)", lo, hi),
+                  (resid, f"{band} residual", -.2*hi, .2*hi))
         for ax, (data, title, lo, hi) in zip(row, panels):
-            artist = ax.imshow(data, origin="lower", cmap="RdBu_r" if title == "Residual" else "gray",
+            artist = ax.imshow(data, origin="lower", cmap="RdBu_r" if title.endswith("residual") else "gray",
                                vmin=lo, vmax=hi, extent=extent)
             ax.set_title(title)
             ax.set(xlabel="x offset (arcsec)", ylabel="y offset (arcsec)")
