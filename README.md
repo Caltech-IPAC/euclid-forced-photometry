@@ -70,7 +70,9 @@ jupyter lab notebooks/
 ```
 
 The install script uses an active virtualenv or conda environment, or creates
-`.venv`. It installs this package plus the required Tractor and astrometry.net
+`.venv`. A fresh environment is safest, for example
+`conda create -n euclid python=3.11` and `conda activate euclid` before
+running the script, rather than conda `base`. It installs this package plus the required Tractor and astrometry.net
 components. WISE additionally requires `unwise_psf` and its dependencies;
 IRAC needs nothing extra. Start Jupyter from that environment so the
 notebooks pick up its kernel.

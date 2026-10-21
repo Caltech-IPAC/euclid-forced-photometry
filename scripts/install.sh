@@ -177,7 +177,10 @@ else
     # Tractor's SWIG wrapper for _mp_fourier still names two Python 2 C-API
     # functions; recent clang rejects the implicit declarations and the
     # module would fail to load anyway. Map them to their Python 3 names.
-    CFLAGS="${CFLAGS:-} -DPyString_Check=PyUnicode_Check -DPyInt_Check=PyLong_Check" \
+    # SWIG >= 4.4 also generates an int-returning module init, in which
+    # numpy < 2.3.5's import_array() macro returns NULL; recent clang/gcc
+    # treat that as an error, so downgrade it to a warning.
+    CFLAGS="${CFLAGS:-} -DPyString_Check=PyUnicode_Check -DPyInt_Check=PyLong_Check -Wno-int-conversion" \
         "$PY" -m pip install --no-build-isolation \
         "git+https://github.com/dstndstn/tractor.git"
 fi
