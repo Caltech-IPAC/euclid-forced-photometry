@@ -224,10 +224,14 @@ def _revert_railed_shapes(sources, seed_shapes, *,
     for i, seed in seed_shapes.items():
         src = sources[i]
         try:
-            re_fit = float(src.getShape().re)
             re_seed = float(seed.re)
+            shape = src.getShape()
         except (AttributeError, TypeError):
             continue
+        try:
+            re_fit = float(shape.re)
+        except OverflowError:
+            re_fit = np.inf
         cap = float(np.clip(growth_cap * re_seed,
                             re_floor_arcsec, max_re_arcsec))
         if not np.isfinite(re_fit) or re_fit > cap:
@@ -328,27 +332,29 @@ def fit_free_shapes(tractor, tim, sources, fit_quality, *,
             n_thawed += 1
 
     def _optimize_loop():
+        n_railed = 0
         for _ in range(n_iter):
             try:
                 dlnp, _, _ = tractor.optimize()
             except OverflowError:
-                # EllipseESoft.re = exp(logre); LSQR can overflow it in
-                # degenerate shape directions.
+                # EllipseESoft.re = exp(logre); restore invalid shapes
+                # even when an optimizer update fails partway through.
                 warnings.warn(
                     "LSQR shape optimization overflowed; abandoning the "
-                    "remaining step-2 iterations. Step-1 (forced-phot) "
-                    "fluxes are unaffected.",
+                    "remaining step-2 iterations and restoring runaway shapes.",
                     stacklevel=2,
                 )
                 break
+            finally:
+                # Check every accepted update, including the last one.
+                # Otherwise an unchecked recovery pass can leave a huge
+                # radius that becomes an enormous FFT patch in WISE/IRAC.
+                n_railed += _revert_railed_shapes(sources, seed_shapes)
             if dlnp < dlnp_min:
                 break
+        return n_railed
 
-    _optimize_loop()
-
-    # The optimizer enforces no shape bounds; a runaway radius hides its
-    # flux in extrapolated wings.
-    n_railed = _revert_railed_shapes(sources, seed_shapes)
+    n_railed = _optimize_loop()
     if n_railed:
         warnings.warn(
             f"step 2 reverted {n_railed} runaway shape(s) to the prior "
@@ -356,7 +362,10 @@ def fit_free_shapes(tractor, tim, sources, fit_quality, *,
             "with those shapes frozen.",
             stacklevel=2,
         )
-        _optimize_loop()
+        # Recover amplitudes at the final, checked shapes. Repeating a
+        # free-shape pass here would allow another source to run away.
+        freeze_to_brightness(sources)
+        solve_fluxes(tractor, variance=False)
 
     for i, src in enumerate(sources):
         if not fit_quality[i]:
