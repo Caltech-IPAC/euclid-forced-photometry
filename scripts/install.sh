@@ -35,7 +35,7 @@ WANT_WISE=0
 PY_OVERRIDE=""
 PINNED=1
 
-# Commits known to work with scripts/constraints.txt (last checked 2026-11-07).
+# Commits known to work with scripts/constraints.txt (last checked 2026-11-08).
 TRACTOR_COMMIT=3fd2e80eafb9cc092e203ba50a95557eb8543878      # 2026-04-22, Tractor 11.1
 ASTROMETRY_COMMIT=42b12ec1d50cbfd7fe90f9e645e84643bf018029   # 2026-10-11
 UNWISE_PSF_COMMIT=43d17fc66784f1fce741f46c36f3780a2a5736f5   # 2026-03-07
