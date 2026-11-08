@@ -1,5 +1,5 @@
 # Exact versions known to work together, applied by scripts/install.sh as pip
-# constraints. Last checked 2026-11-07 with Python 3.12 on macOS (arm64).
+# constraints. Last checked 2026-11-08 with Python 3.12 on macOS (arm64).
 # Pass --unpinned to install.sh to ignore this file. Tractor, astrometry.net
 # and unwise_psf are pinned to commits inside install.sh.
 astropy==8.0.1

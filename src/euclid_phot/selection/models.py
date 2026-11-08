@@ -246,7 +246,9 @@ def _build_initial_source(mer_row, model_class, sep_row, pixscale_arcsec,
     Seeds brightness from the MER flux; the tree decides morphology.
     """
     pos = RaDecPos(float(mer_row["ra"]), float(mer_row["dec"]))
-    flux_uJy = float(mer_row["flux_vis_sersic"])
+    seed = mer_row["flux_vis_sersic"]
+    # A masked MER flux (no Sérsic fit) seeds the same 1 uJy as a missing one.
+    flux_uJy = float("nan") if np.ma.is_masked(seed) else float(seed)
     if not np.isfinite(flux_uJy) or flux_uJy <= 0:
         flux_uJy = 1.0
     brightness = NanoMaggies(**{"VIS": flux_uJy / UJY_PER_NMGY})
