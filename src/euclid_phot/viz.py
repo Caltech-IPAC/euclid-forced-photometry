@@ -179,7 +179,7 @@ def show_residual(data, model, footprint=None,
                   *,
                   ax=None, vlim_sigma: float = 5.0, title: str | None = None,
                   invvar=None, colorbar: bool = True, unit: str | None = None,
-                  scale: float = 1.0):
+                  scale: float = 1.0, vlim: float | None = None):
     """Plot ``data - model`` against a stated noise reference.
 
     With ``invvar=None`` the color limits are
@@ -190,6 +190,8 @@ def show_residual(data, model, footprint=None,
     which is the scale to use when judging consistency with the noise model.
     ``scale`` multiplies the displayed residual, e.g. ``ujy_per_unit(cutout)``
     with ``unit="µJy/pixel"``; the returned ``info`` stays in input units.
+    ``vlim`` sets the colour limit directly, in input units, in place of
+    ``vlim_sigma``, e.g. to share one scale between bands.
 
     Returns ``(ax, info)`` where ``info`` is a dict with the displayed
     ``sigma``, the empirical ``residual_std`` (sigma-clipped), the
@@ -226,10 +228,12 @@ def show_residual(data, model, footprint=None,
             from astropy.stats import mad_std as _mad
             info["chi_mad"] = float(_mad(finite))
             info["pct_chi_gt_3"] = float(100.0 * (np.abs(finite) > 3).mean())
-        vlim = vlim_sigma * formal_sigma
+        limit = vlim_sigma * formal_sigma
     else:
         info["sigma_used"] = float(emp_sigma)
-        vlim = vlim_sigma * float(emp_sigma)
+        limit = vlim_sigma * float(emp_sigma)
+    if vlim is not None:
+        limit = float(vlim)
 
     shown = residual
     cmap = plt.get_cmap("RdBu_r")
@@ -239,7 +243,7 @@ def show_residual(data, model, footprint=None,
         cmap = cmap.copy()
         cmap.set_bad("0.75")
     image = ax.imshow(shown * scale, origin="lower", cmap=cmap,
-                      vmin=-vlim * scale, vmax=vlim * scale)
+                      vmin=-limit * scale, vmax=limit * scale)
     if colorbar:
         add_colorbar(ax, image, f"data − model ({unit})" if unit else "data − model")
     if title is not None:

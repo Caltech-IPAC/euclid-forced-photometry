@@ -61,7 +61,18 @@ or 05 for a short working example.
 
 ## Install and run
 
-From the repository directory:
+The install script installs into the active virtualenv or conda environment,
+or creates `.venv` when none is active. A fresh environment is safest, for
+example `conda create -n euclid python=3.12` and `conda activate euclid`
+before running the script, rather than conda `base`. It installs this
+package plus the required Tractor and astrometry.net components. The
+`--wise` option adds `unwise_psf` and its dependencies, which notebooks 02
+and 03 need (03 compares IRAC with unWISE); IRAC itself needs nothing
+extra. The script installs the versions it was last checked with: the
+PyPI packages listed in `scripts/constraints.txt`, and Tractor,
+astrometry.net and unwise_psf at the commits named in the script;
+`--unpinned` takes the latest of each instead. From the repository
+directory:
 
 ```bash
 ./scripts/install.sh
@@ -71,13 +82,7 @@ source .venv/bin/activate
 jupyter lab notebooks/
 ```
 
-The install script uses an active virtualenv or conda environment, or creates
-`.venv`. A fresh environment is safest, for example
-`conda create -n euclid python=3.11` and `conda activate euclid` before
-running the script, rather than conda `base`. It installs this package plus the required Tractor and astrometry.net
-components. WISE additionally requires `unwise_psf` and its dependencies;
-IRAC needs nothing extra. Start Jupyter from that environment so the
-notebooks pick up its kernel.
+Start Jupyter from that environment so the notebooks pick up its kernel.
 
 No survey data ship with the repository. The first time a notebook or a
 fit needs a Euclid, unWISE, IRAC or SDSS input it downloads it from the
@@ -302,7 +307,18 @@ IRAC extinction coefficients are from
 [Indebetouw et al. (2005)](https://ui.adsabs.harvard.edu/abs/2005ApJ...619..931I).
 Please cite the relevant survey and method papers when using their data or methods.
 
-## Authors
+## About
 
 Nima Chartab, Shoubaneh Hemmati and Ian Lin, Euclid NASA Science Center at
-IPAC (ENSCI).
+IPAC (ENSCI). Last updated 7 November 2026.
+
+When last checked, every notebook ran without error in a fresh environment
+set up by `scripts/install.sh` with Python 3.12 on macOS, at the versions
+the script pins. The notebooks are not regularly tested afterwards. To
+report a problem or ask a question, open an
+[issue](https://github.com/Caltech-IPAC/euclid-forced-photometry/issues).
+
+The code and text were developed with the assistance of AI tools
+(Anthropic's Claude) and reviewed by the authors. The fitting engine is
+The Tractor, and the data come from IRSA, the Euclid Consortium, unWISE,
+the Cosmic Dawn Survey and SDSS, cited in the references above.

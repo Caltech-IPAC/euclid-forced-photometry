@@ -1,0 +1,22 @@
+# Exact versions known to work together, applied by scripts/install.sh as pip
+# constraints. Last checked 2026-11-07 with Python 3.12 on macOS (arm64).
+# Pass --unpinned to install.sh to ignore this file. Tractor, astrometry.net
+# and unwise_psf are pinned to commits inside install.sh.
+astropy==8.0.1
+astroquery==0.4.11
+numpy==2.5.4
+scipy==1.18.1
+matplotlib==3.10.5
+sep==1.4.1
+reproject==0.21.0
+pyvo==1.9.1
+s3fs==2025.7.0
+fsspec==2025.7.0
+jupyter==1.1.1
+# Tractor build
+Cython==3.3.0
+setuptools==80.9.0
+wheel==0.45.1
+swig==4.5.1
+# unWISE leg
+fitsio==1.4.2

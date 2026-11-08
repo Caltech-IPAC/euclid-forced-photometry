@@ -8,7 +8,10 @@ project:
     - Nima Chartab
     - Shoubaneh Hemmati
     - Ian Lin
-  copyright: "2026 Euclid NASA Science Center at IPAC"
+  copyright: "2026 California Institute of Technology"
+  license:
+    id: BSD-3-Clause
+    url: https://github.com/Caltech-IPAC/euclid-forced-photometry/blob/main/LICENSE
   exclude:
     - .anet/**
     - .unwise_psf/**
