@@ -1,4 +1,4 @@
-"""Cutout discovery and fetch for Euclid Q1 MER mosaics.
+"""Cutout discovery and fetch for the selected Euclid release.
 
 Two cache layers: a small cutout-FITS cache at
 ``data_dir/<band>_<ptype>_<ra>_<dec>_<size>_native-v1.fits`` (ptype is science, rms,
@@ -24,13 +24,11 @@ from astropy.coordinates import SkyCoord
 from astropy.io import fits
 from astropy.nddata.utils import overlap_slices, PartialOverlapError, NoOverlapError
 from astropy.wcs import WCS
-from astroquery.ipac.irsa import Irsa
+from ..data_access import get_access_settings, get_data_dir, get_irsa_client
 from astropy.wcs.utils import proj_plane_pixel_scales
 
 from ..netutils import read_s3_image_section
 from .config import (
-    DEFAULT_CUTOUT_DIR,
-    MER_COLLECTION,
     MER_TILE_HALF_DEG,
     SIA_SEARCH_PAD_DEG,
 )
@@ -97,10 +95,11 @@ def discover_mer_mosaics(ra: float, dec: float, half_size_deg: float,
     from ..netutils import retry
     target = SkyCoord(ra=ra, dec=dec, unit="deg")
     search_radius_deg = MER_TILE_HALF_DEG + half_size_deg + SIA_SEARCH_PAD_DEG
+    client = get_irsa_client()
     sia_results = retry(
-        lambda: Irsa.query_sia(
+        lambda: client.query_sia(
             pos=(target, search_radius_deg * u.deg),
-            collection=MER_COLLECTION,
+            collection=get_access_settings()["image_collection"],
         ),
         what="IRSA SIA discovery")
 
@@ -278,7 +277,7 @@ def _write_mask_fits(path: Path, mask: np.ndarray, wcs: WCS, header: fits.Header
 def fetch_cutout(band: str, ra: float, dec: float, size_arcsec: float,
                  *,
                  products: dict | None = None,
-                 data_dir: str | Path = DEFAULT_CUTOUT_DIR,
+                 data_dir: str | Path | None = None,
                  mosaic_cache_dir: str | Path | None = None,
                  force_download: bool = False,
                  with_rms: bool = True,
@@ -316,7 +315,7 @@ def fetch_cutout(band: str, ra: float, dec: float, size_arcsec: float,
     -------
     Cutout
     """
-    data_dir = Path(data_dir)
+    data_dir = get_data_dir() / "cutouts" if data_dir is None else Path(data_dir)
     sci_cache = _cutout_cache_path(band, ra, dec, size_arcsec, data_dir, "science")
     rms_cache = _cutout_cache_path(band, ra, dec, size_arcsec, data_dir, "rms")
     flag_cache = _cutout_cache_path(band, ra, dec, size_arcsec, data_dir, "flag")

@@ -22,7 +22,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .config import DEFAULT_DATA_DIR
+from .data_access import get_data_access, get_data_dir
 from .euclid.catalog import query_mer_catalog
 from .euclid.cutouts import discover_mer_mosaics, fetch_cutout
 from .euclid.image import build_tractor_image
@@ -357,6 +357,7 @@ class ForcedPhotometryResult:
     error_calibration: dict = field(default_factory=dict)
     # Cache directory of the run (used by to_table for the E(B-V) fallback).
     data_dir: object = None
+    release: str = field(default_factory=get_data_access)
     # True = pixel given zero weight in the prior-band fit
     # (mask_bright_stars).
     prior_pixel_mask: np.ndarray | None = None
@@ -375,6 +376,7 @@ class ForcedPhotometryResult:
         from .catalog_table import build_catalog
         table = build_catalog(self, **kwargs)
         table.meta['psf_mode'] = self.psf_mode
+        table.meta['DATAREL'] = self.release
         return table
 
     def image_set(self, band: str) -> dict:
@@ -491,7 +493,7 @@ def _load_source_list(run, result, user_coords, mer_catalog):
         result.mer_cat = mer_catalog
     else:
         # Cache the MER catalog so a re-run skips the IRSA TAP query.
-        mer_cache = data_dir / (
+        mer_cache = data_dir / "catalogs" / (
             f"mer_catalog_{target_ra:.4f}_{target_dec:.4f}"
             f"_{int(round(cutout_size_arcsec))}.fits")
         if mer_cache.exists() and not force_download:
@@ -1061,7 +1063,7 @@ def run_forced_photometry(
     prior: dict | None = None,
     target_bands: dict | None = None,
     user_coords=None,
-    data_dir: str | Path = DEFAULT_DATA_DIR,
+    data_dir: str | Path | None = None,
     force_download: bool = False,
     verbose: bool = True,
     n_workers: int = 1,
@@ -1236,7 +1238,7 @@ def run_forced_photometry(
             "of geometric bright_star_pixel_mask options.")
     flux_col = _MER_FLUX_COL[prior_band]
 
-    data_dir = Path(data_dir)
+    data_dir = get_data_dir() if data_dir is None else Path(data_dir)
     cutout_dir = data_dir / "cutouts"
     psf_dir = data_dir / "psf"
     wise_dir = data_dir / "wise"

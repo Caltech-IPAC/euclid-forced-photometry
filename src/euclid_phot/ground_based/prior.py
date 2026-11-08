@@ -52,7 +52,7 @@ def prepare_euclid(image: SmallImage, data_dir: str | Path,
     # rotated. Use the bounding sky square, including a small source margin.
     size = float(10.0 * np.ceil(raw_side / 10))
     # Same cache name as run_forced_photometry, so either can reuse it.
-    mer_path = data_dir / f"mer_catalog_{ra:.4f}_{dec:.4f}_{int(round(size))}.fits"
+    mer_path = data_dir / "catalogs" / f"mer_catalog_{ra:.4f}_{dec:.4f}_{int(round(size))}.fits"
     if mer_path.is_file():
         mer = Table.read(mer_path)
         print("MER: local cache", mer_path.name)
