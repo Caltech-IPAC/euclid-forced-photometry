@@ -81,11 +81,13 @@ notebooks pick up its kernel.
 
 No survey data ship with the repository. The first time a notebook or a
 fit needs a Euclid, unWISE, IRAC or SDSS input it downloads it from the
-public archive and keeps it under `examples/native_data/` in the repository,
+archive and keeps it under `examples/data/<release>/` in the repository,
 or under `EUCLID_PHOT_DATA_DIR` if that is set. Later
 runs read from that cache, so only the first run on a field needs network
 access. The notebooks can be started from `notebooks/` or from
 `notebooks/supporting_notebooks/`.
+
+The cache moved from `examples/native_data/` to `examples/data/q1/` or `examples/data/dr1/deep_survey/`; existing caches are not picked up automatically.
 
 ## Running a fit
 

@@ -17,7 +17,6 @@ from astropy.coordinates import SkyCoord
 from astropy.io import fits
 from astropy.table import Table
 from astropy.wcs import WCS
-from astroquery.ipac.irsa import Irsa
 
 from .archive import PBCDLocalSet, discover_pbcd, fetch_pbcd
 from .config import (
@@ -28,6 +27,7 @@ from .config import (
     normalize_channel,
 )
 from .mosaic import MosaicCutout, load_mosaic_cutout
+from ..data_access import get_public_irsa_client
 from ..netutils import (
     download_file,
     ensure_https_ca_bundle,
@@ -424,8 +424,9 @@ def fetch_cosmic_dawn_mosaic(
 
 def _seip_science_products(ra: float, dec: float, channel: str):
     """Return original full-mosaic URLs covering one coordinate."""
+    client = get_public_irsa_client()
     rows = retry(
-        lambda: Irsa.query_sia(
+        lambda: client.query_sia(
             pos=(SkyCoord(float(ra), float(dec), unit="deg"), 1.0 * u.arcsec),
             collection=SEIP_COLLECTION,
             maxrec=10000,

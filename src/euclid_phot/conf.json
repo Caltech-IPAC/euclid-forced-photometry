@@ -1,0 +1,37 @@
+{
+  "default_data_access": "Q1",
+  "releases": {
+    "Q1": {
+      "catalog_table": "euclid_q1_mer_catalogue",
+      "morphology_table": "euclid_q1_mer_morphology",
+      "image_collection": "euclid_DpdMerBksMosaic",
+      "cache_subdir": "q1",
+      "maxrec": 200000,
+      "irsa": {
+        "tap_url": "https://irsa.ipac.caltech.edu/TAP",
+        "sia_url": "https://irsa.ipac.caltech.edu/SIA",
+        "ssa_url": "https://irsa.ipac.caltech.edu/SSA",
+        "timeout_seconds": 600
+      }
+    },
+    "DR1": {
+      "catalog_table": "euclid_dr1_mer_catalogue_deep_survey",
+      "morphology_table": null,
+      "image_collection": "euclid_dr1_deep_DpdMerBksMosaic",
+      "cache_subdir": "dr1/deep_survey",
+      "maxrec": 200000,
+      "irsa": {
+        "tap_url": "https://irsadev.ipac.caltech.edu/TAP",
+        "sia_url": "https://irsadev.ipac.caltech.edu/SIA",
+        "ssa_url": "https://irsadev.ipac.caltech.edu/SSA",
+        "timeout_seconds": 600
+      }
+    }
+  },
+  "public_irsa": {
+    "tap_url": "https://irsa.ipac.caltech.edu/TAP",
+    "sia_url": "https://irsa.ipac.caltech.edu/SIA",
+    "ssa_url": "https://irsa.ipac.caltech.edu/SSA",
+    "timeout_seconds": 600
+  }
+}

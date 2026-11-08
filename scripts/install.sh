@@ -223,6 +223,18 @@ else
     log "Skipping the unWISE leg (pass --wise to include it)"
 fi
 
+# Verify that the release configuration is included in the installed package.
+log "Checking Q1/DR1 configuration"
+"$PY" - <<'PYEOF'
+import euclid_phot as ep
+from euclid_phot.data_access import CONFIG_PATH, get_access_settings
+for release in ("Q1", "DR1"):
+    settings = get_access_settings(release)
+    print(f"    {release}: {settings['catalog_table']}")
+print(f"    configuration: {CONFIG_PATH}")
+print(f"    package: {ep.__file__}")
+PYEOF
+
 # --- Done --------------------------------------------------------------------
 log "Done."
 if [[ "${CREATED_VENV:-0}" -eq 1 ]]; then
@@ -230,4 +242,4 @@ if [[ "${CREATED_VENV:-0}" -eq 1 ]]; then
     echo "    source .venv/bin/activate"
 fi
 echo "Launch the notebooks with:"
-echo "    jupyter lab notebooks/"
+echo "    \"$PY\" -m jupyterlab notebooks/"

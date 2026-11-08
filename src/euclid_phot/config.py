@@ -8,10 +8,14 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-# Download cache shared by every band; the notebooks use the same folder.
-# Lives under the repository so it does not depend on the working directory.
+# Base cache directory; get_data_dir() adds the selected release subdirectory.
+# Editable checkouts use examples/data; wheels use a writable user cache.
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_DATA_DIR = Path(os.environ.get("EUCLID_PHOT_DATA_DIR", _REPO_ROOT / "examples/native_data"))
+_DEFAULT_CACHE = (_REPO_ROOT / "examples/data"
+                  if (_REPO_ROOT / "pyproject.toml").is_file()
+                  and Path(__file__).resolve().parent.parent.name == "src"
+                  else Path.home() / ".cache/euclid_phot")
+DEFAULT_DATA_DIR = Path(os.environ.get("EUCLID_PHOT_DATA_DIR", _DEFAULT_CACHE))
 
 # R_lambda = A_lambda / E(B-V). Euclid: Gordon et al. (2023) MW curve,
 # A_lambda/A_V = 0.678/0.366/0.261/0.160 (Hunt et al. 2025, A&A 697, A9)

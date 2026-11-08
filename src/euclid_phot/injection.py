@@ -250,7 +250,7 @@ def run_injection_recovery(*,
                                        or run_kwargs.get("mask_bright_stars") is True))
             for b in bands}
 
-    mer_cache = data_dir / (f"mer_catalog_{target_ra:.4f}_{target_dec:.4f}"
+    mer_cache = data_dir / "catalogs" / (f"mer_catalog_{target_ra:.4f}_{target_dec:.4f}"
                             f"_{int(round(cutout_size_arcsec))}.fits")
     if mer_cache.exists():
         mer = Table.read(mer_cache)

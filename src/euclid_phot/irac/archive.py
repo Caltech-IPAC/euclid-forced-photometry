@@ -10,9 +10,9 @@ from pathlib import Path
 import astropy.units as u
 import numpy as np
 from astropy.coordinates import SkyCoord
-from astroquery.ipac.irsa import Irsa
 
 from .config import DEFAULT_PBCD_DIR, normalize_channel
+from ..data_access import get_public_irsa_client
 from ..netutils import download_file, retry
 
 
@@ -85,8 +85,9 @@ def discover_pbcd(
             or search_radius_arcsec <= 0:
         raise ValueError("ra, dec, and positive search_radius_arcsec must be finite")
 
+    client = get_public_irsa_client()
     rows = retry(
-        lambda: Irsa.query_sia(
+        lambda: client.query_sia(
             pos=(SkyCoord(float(ra), float(dec), unit="deg"),
                  float(search_radius_arcsec) * u.arcsec),
             collection=SHA_COLLECTION,

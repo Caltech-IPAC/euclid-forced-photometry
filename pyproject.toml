@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "euclid_phot"
 version = "0.5.0"
-description = "Educational workflows for Euclid Q1 VIS/NISP, unWISE, Spitzer/IRAC and ground-based forced photometry with Tractor."
+description = "Educational workflows for Euclid Q1/DR1 VIS/NISP, unWISE, Spitzer/IRAC and ground-based forced photometry with Tractor."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
@@ -27,6 +27,7 @@ classifiers = [
 ]
 dependencies = [
     "astropy>=5.3",
+    "certifi>=2024.2",
     "numpy>=1.26",
     "scipy>=1.11",
     "matplotlib>=3.8",
@@ -47,6 +48,7 @@ euclid-phot = "euclid_phot.cli:main"
 [project.optional-dependencies]
 dev = [
     "jupyter>=1.0",
+    "pytest>=7.4",
 ]
 
 [project.urls]
@@ -56,3 +58,6 @@ Issues = "https://github.com/Caltech-IPAC/euclid-forced-photometry/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+euclid_phot = ["conf.json"]

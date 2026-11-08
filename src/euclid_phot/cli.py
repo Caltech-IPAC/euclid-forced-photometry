@@ -14,12 +14,14 @@ from __future__ import annotations
 import argparse
 import sys
 
-from .config import DEFAULT_DATA_DIR
+from .data_access import get_data_access, set_data_access
 
 
 def _add_common(p: argparse.ArgumentParser):
-    p.add_argument("--data-dir", default=str(DEFAULT_DATA_DIR),
-                   help="cache directory (default: %(default)s)")
+    p.add_argument("--data-access", choices=("Q1", "DR1"), default=get_data_access(),
+                   help="Euclid release (default: %(default)s)")
+    p.add_argument("--data-dir", default=None,
+                   help="cache directory (default: the selected release's cache)")
     p.add_argument("--prior-band", default="VIS",
                    choices=("VIS", "Y", "J", "H"))
     p.add_argument("--objects", default="mer", choices=("mer", "free"),
@@ -122,7 +124,7 @@ def _build_kwargs(args) -> dict:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         prog="euclid-phot",
-        description="Forced photometry on Euclid Q1 (+unWISE, IRAC, your own "
+        description="Forced photometry on Euclid Q1/DR1 (+unWISE, IRAC, your own "
                     "ground image) with Tractor.")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -139,6 +141,7 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "run":
+        set_data_access(args.data_access)
         from .pipeline import run_forced_photometry
         result = run_forced_photometry(args.ra, args.dec, args.size,
                                        **_build_kwargs(args))

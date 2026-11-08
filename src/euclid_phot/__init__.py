@@ -1,4 +1,4 @@
-"""euclid_phot: forced photometry on Euclid Q1 with Tractor.
+"""euclid_phot: forced photometry on the selected Euclid release with Tractor.
 
 Every band is measured with the same recipe; only its data and PSF differ.
 
@@ -25,7 +25,7 @@ Band-specific (data access, PSF, corrections, catalog checks):
 The package imports Tractor and matplotlib only when first used, so
 importing euclid_phot does not require them. The notebooks download their
 inputs from IRSA/S3 on first run and cache them under
-``examples/native_data/``.
+``examples/data/q1/`` or ``examples/data/dr1/deep_survey/``.
 """
 from __future__ import annotations
 
@@ -34,6 +34,9 @@ __version__ = "0.5.0"
 # Names that resolve via __getattr__ (PEP 562). Listed here so IDEs and
 # `from euclid_phot import *` find them.
 _LAZY = {
+    "set_data_access": ("data_access", "set_data_access"),
+    "get_data_access": ("data_access", "get_data_access"),
+    "get_data_dir": ("data_access", "get_data_dir"),
     # shared units and Tractor image
     "UJY_PER_NMGY": ("units", "UJY_PER_NMGY"),
     "flux_to_ab_mag": ("units", "flux_to_ab_mag"),

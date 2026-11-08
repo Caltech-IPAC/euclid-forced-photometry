@@ -9,8 +9,8 @@ from pathlib import Path
 import numpy as np
 from astropy.coordinates import SkyCoord
 from astropy.table import Table
-from astroquery.ipac.irsa import Irsa
 
+from ..data_access import get_public_irsa_client
 from ..netutils import retry
 from ..scene import select_isolated_sources
 from ..units import UJY_PER_NMGY
@@ -42,12 +42,13 @@ def _query_unwise_table(adql, *, cache_dir=DEFAULT_WISE_CACHE_DIR / "catalogs"):
             if cat.meta.get("irsa_query") != query:
                 raise ValueError(f"unWISE query cache provenance mismatch: {path}")
             return cat
-    cat = retry(lambda: Irsa.query_tap(query=adql).to_table(),
+    client = get_public_irsa_client()
+    cat = retry(lambda: client.query_tap(query=adql).to_table(),
                 what="IRSA TAP unWISE query")
     if path is not None:
         path.parent.mkdir(parents=True, exist_ok=True)
         cat.meta["irsa_query"] = query
-        cat.meta["irsa_endpoint"] = "https://irsa.ipac.caltech.edu/TAP"
+        cat.meta["irsa_endpoint"] = client.tap_url
         cat.meta["retrieved_utc"] = datetime.now(timezone.utc).isoformat()
         with tempfile.NamedTemporaryFile(dir=path.parent, suffix=".ecsv", delete=False) as f:
             temporary = Path(f.name)
