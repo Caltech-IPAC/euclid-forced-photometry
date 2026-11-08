@@ -84,9 +84,13 @@ jupyter lab notebooks/
 
 Start Jupyter from that environment so the notebooks pick up its kernel.
 
-No survey data ship with the repository. The first time a notebook or a
-fit needs a Euclid, unWISE, IRAC or SDSS input it downloads it from the
-archive and keeps it under `examples/data/<release>/` in the repository,
+Each notebook starts by choosing the Euclid release. The default is Q1,
+which is public. Setting the selector in the first cell to DR1 picks the
+Deep Survey release of DR1 instead, which is reachable only from the
+IPAC network until its public release. No survey data ship with the
+repository. The first time a notebook or a fit needs a Euclid, unWISE,
+IRAC or SDSS input it downloads it from the archive and keeps it under
+`examples/data/<release>/` in the repository,
 or under `EUCLID_PHOT_DATA_DIR` if that is set. Later
 runs read from that cache, so only the first run on a field needs network
 access. The notebooks can be started from `notebooks/` or from
