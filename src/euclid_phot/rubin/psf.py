@@ -80,8 +80,3 @@ def fetch_official_psfs(client, token, downloaded, positions, *, lab_size="Small
         result[band] = OfficialPSF(stamps, sky, xy, request["dataset_id"], path)
         print(f"{band}: official PSF {stamps.shape}", flush=True)
     return result
-
-
-def saved_psf_validation_dir(collection, ra, dec):
-    """Location of the bundled one-time verification for a field."""
-    return Path(__file__).with_name("data") / collection / f"{ra:.5f}_{dec:+.5f}"

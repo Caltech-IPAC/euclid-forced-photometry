@@ -18,6 +18,7 @@ from astropy.wcs import WCS
 from pyvo.dal.adhoc import DatalinkResults, SodaQuery
 
 from ..netutils import ensure_https_ca_bundle
+from .paths import get_cache_dir
 
 
 @dataclass(frozen=True)
@@ -94,12 +95,12 @@ def validate_band(band):
 
 class RubinClient:
     """Token-authenticated VO client with local, token-independent data caches."""
-    def __init__(self, token: str, *, cache_dir: str | Path,
+    def __init__(self, token: str, *, cache_dir: str | Path | None = None,
                  config: RubinConfig | None = None):
         token = validate_token(token)
         ensure_https_ca_bundle()
         self.config = config or RubinConfig()
-        self.cache_dir = Path(cache_dir)
+        self.cache_dir = Path(cache_dir) if cache_dir is not None else get_cache_dir()
         self.session = _Session()
         self.session.auth = _TokenAuth(token.strip(), self.config.base_url)
         base = self.config.base_url.rstrip("/")

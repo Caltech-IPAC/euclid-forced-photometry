@@ -61,4 +61,4 @@ Issues = "https://github.com/Caltech-IPAC/euclid-forced-photometry/issues"
 where = ["src"]
 
 [tool.setuptools.package-data]
-euclid_phot = ["conf.json", "rubin/data/*/*/*.png", "rubin/data/*/*/*.npz", "rubin/data/*/*/*.ecsv"]
+euclid_phot = ["conf.json"]

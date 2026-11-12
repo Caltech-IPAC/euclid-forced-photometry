@@ -28,7 +28,3 @@ dist/
 
 # Jupyter Book output
 _build/
-
-# Bundled PSF verification assets are package resources, not download caches
-!src/euclid_phot/rubin/data/
-!src/euclid_phot/rubin/data/**
