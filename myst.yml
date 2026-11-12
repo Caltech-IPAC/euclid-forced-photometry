@@ -22,6 +22,7 @@ project:
     - file: notebooks/02_wise_forced_photometry.ipynb
     - file: notebooks/03_irac_forced_photometry.ipynb
     - file: notebooks/04_ground_based_forced_photometry.ipynb
+    - file: notebooks/04.1_rubin_forced_photometry.ipynb
     - file: notebooks/05_one_call.ipynb
     - file: notebooks/06_photometry_at_coordinates.ipynb
     - title: Supporting notebooks

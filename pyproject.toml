@@ -34,6 +34,7 @@ dependencies = [
     "sep>=1.2",
     "reproject>=0.13",
     "pyvo>=1.5",
+    "requests>=2.28",
     "astroquery>=0.4.7",
     "s3fs>=2024.6",
     "fsspec[http]>=2024.6",
@@ -60,4 +61,4 @@ Issues = "https://github.com/Caltech-IPAC/euclid-forced-photometry/issues"
 where = ["src"]
 
 [tool.setuptools.package-data]
-euclid_phot = ["conf.json"]
+euclid_phot = ["conf.json", "rubin/data/*/*/*.png", "rubin/data/*/*/*.npz", "rubin/data/*/*/*.ecsv"]

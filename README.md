@@ -45,6 +45,8 @@ still be checked on each science sample before the measurements are used.
 - [04: Forced photometry on an SDSS image](notebooks/04_ground_based_forced_photometry.ipynb):
   a 200-arcsec SDSS g image as the example ground-based image, with a
   comparison to the SDSS catalog; swap in your own image in section 1.
+- [04.1: Euclid-prior forced photometry on Rubin](notebooks/04.1_rubin_forced_photometry.ipynb):
+  Rubin API images and official PSFs, the shared ground-based fit, and catalog checks.
 - [05: Multi-band photometry in one call](notebooks/05_one_call.ipynb): a compact
   50-arcsec run measuring Euclid, unWISE and IRAC bands in one call, and the
   resulting catalog.

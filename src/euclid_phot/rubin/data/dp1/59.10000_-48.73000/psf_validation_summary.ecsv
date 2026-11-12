@@ -1,0 +1,24 @@
+# %ECSV 1.0
+# ---
+# datatype:
+# - {name: band, datatype: string}
+# - {name: stars, datatype: int64}
+# - {name: official_core_fwhm_arcsec, datatype: float64}
+# - {name: empirical_core_fwhm_arcsec, datatype: float64}
+# - {name: official_center_core_fwhm_arcsec, datatype: float64}
+# - {name: status, datatype: string}
+# meta: !!omap
+# - {RA: 59.1}
+# - {DEC: -48.73}
+# - {VALIDATION_SIZE_ARCSEC: 300.0}
+# - {METHOD: 'Median recentered, sky-subtracted stellar stamps; each official kernel evaluated at that star'}
+# - {NORMALIZATION: Observed stamps normalized by core flux; official amplitudes fitted in the core}
+# - {LIMIT: Empirical PSF is diagnostic only; few stars and morphology/PSF spatial variations limit the comparison}
+# schema: astropy-2.0
+band stars official_core_fwhm_arcsec empirical_core_fwhm_arcsec official_center_core_fwhm_arcsec status
+u 9 1.6314277206363026 1.6027462328851219 1.6298176261527315 "profile comparison available"
+g 27 1.3588276395187882 1.3292702297600145 1.349931208955918 "profile comparison available"
+r 36 1.332946943416349 1.3066263942609628 1.3335408648588667 "profile comparison available"
+i 36 1.2172743463526379 1.1975425249983584 1.216893015333548 "profile comparison available"
+z 37 1.3271181709563227 1.3029784570696095 1.3285774889803446 "profile comparison available"
+y 26 1.2856034666045641 1.238909278514102 1.2862761257518047 "profile comparison available"

@@ -28,3 +28,10 @@ dist/
 
 # Jupyter Book output
 _build/
+
+# Local development tests are not published
+/tests/
+
+# Bundled PSF verification assets are package resources, not download caches
+!src/euclid_phot/rubin/data/
+!src/euclid_phot/rubin/data/**
