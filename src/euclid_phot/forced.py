@@ -241,11 +241,16 @@ def fit_forced_photometry(tim, sources, *,
                           band: str = "VIS",
                           initial_fluxes_ujy: np.ndarray | None = None,
                           flag_unphysical: bool = True,
+                          reject_negative: bool = True,
                           return_errors: bool = False):
     """Prior-band step 1: freeze everything except brightness; solve fluxes.
 
     Parameters
     ----------
+    reject_negative : bool
+        Treat a negative flux as a failed fit. Off for user-supplied
+        positions, where an empty spot is as likely to come out slightly
+        negative as positive; the 100x runaway check still applies.
     return_errors : bool
         If True, also return ``flux_err_ujy``, the formal 1-sigma flux
         uncertainty (1/sqrt of the Tractor inverse-variance) from this
@@ -276,7 +281,7 @@ def fit_forced_photometry(tim, sources, *,
             flux = _flux_ujy(src, band)
             ref = (initial_fluxes_ujy[i]
                    if initial_fluxes_ujy is not None else None)
-            bad = flux < 0
+            bad = bool(flux < 0) and reject_negative
             if ref is not None and ref > 0 and abs(flux) > 100 * ref:
                 bad = True
             if bad:

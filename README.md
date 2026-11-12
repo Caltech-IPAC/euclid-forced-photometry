@@ -63,7 +63,18 @@ or 05 for a short working example.
 
 ## Install and run
 
-From the repository directory:
+The install script installs into the active virtualenv or conda environment,
+or creates `.venv` when none is active. A fresh environment is safest, for
+example `conda create -n euclid python=3.12` and `conda activate euclid`
+before running the script, rather than conda `base`. It installs this
+package plus the required Tractor and astrometry.net components. The
+`--wise` option adds `unwise_psf` and its dependencies, which notebooks 02
+and 03 need (03 compares IRAC with unWISE); IRAC itself needs nothing
+extra. The script installs the versions it was last checked with: the
+PyPI packages listed in `scripts/constraints.txt`, and Tractor,
+astrometry.net and unwise_psf at the commits named in the script;
+`--unpinned` takes the latest of each instead. From the repository
+directory:
 
 ```bash
 ./scripts/install.sh
@@ -73,17 +84,18 @@ source .venv/bin/activate
 jupyter lab notebooks/
 ```
 
-The install script uses an active virtualenv or conda environment, or creates
-`.venv`. A fresh environment is safest, for example
-`conda create -n euclid python=3.11` and `conda activate euclid` before
-running the script, rather than conda `base`. It installs this package plus the required Tractor and astrometry.net
-components. WISE additionally requires `unwise_psf` and its dependencies;
-IRAC needs nothing extra. Start Jupyter from that environment so the
-notebooks pick up its kernel.
+Start Jupyter from that environment so the notebooks pick up its kernel.
 
-No survey data ship with the repository. The first time a notebook or a
-fit needs a Euclid, unWISE, IRAC or SDSS input it downloads it from the
-archive and keeps it under `examples/data/<release>/` in the repository,
+Each notebook starts by choosing the Euclid release in its first cell.
+The default is the public Q1 release. Setting the selector to DR1 uses
+the Deep Survey release of DR1 instead, reachable only from the IPAC
+network until its public release on 12 November 2026. Those fields hold
+about twice as many sources, so the notebooks take longer, and IRSA does
+not yet serve the DR1 Sérsic shapes, so model selection there starts
+from exponential profiles. No survey data ship
+with the repository. The first time a notebook or a fit needs a Euclid,
+unWISE, IRAC or SDSS input it downloads it from the archive and keeps it
+under `examples/data/<release>/` in the repository,
 or under `EUCLID_PHOT_DATA_DIR` if that is set. Later
 runs read from that cache, so only the first run on a field needs network
 access. The notebooks can be started from `notebooks/` or from
@@ -194,9 +206,12 @@ need a cluster. Every example runs on a single machine. A 200-arcsec field
 of about 850 sources, the size used in notebooks 01 to 03, takes about ten
 minutes with one worker process and 16 GB of memory, or six minutes and
 26 GB with ten workers, on a workstation. The 50-arcsec examples of
-notebooks 05 and 06 are far smaller. Larger areas are fitted as tiles, so
-the cost of a wide run grows with the number of tiles, not with the field
-size.
+notebooks 05 and 06 are far smaller. On a 10-core laptop with 26 GB,
+notebooks 01 to 04 took 8 to 23 minutes each on Q1 including the
+downloads, and 11 to 32 minutes with about 13 GB on the DR1 Deep Survey
+fields, which hold about twice the sources. Larger areas are
+fitted as tiles, so the cost of a wide run grows with the number of tiles,
+not with the field size.
 
 Memory is set by the VIS model selection that opens every
 `run_forced_photometry` call with `"model_selection": "tree"`. It grows
@@ -306,7 +321,18 @@ IRAC extinction coefficients are from
 [Indebetouw et al. (2005)](https://ui.adsabs.harvard.edu/abs/2005ApJ...619..931I).
 Please cite the relevant survey and method papers when using their data or methods.
 
-## Authors
+## About
 
 Nima Chartab, Shoubaneh Hemmati and Ian Lin, Euclid NASA Science Center at
-IPAC (ENSCI).
+IPAC (ENSCI). Last updated 8 November 2026.
+
+When last checked, every notebook ran without error in a fresh environment
+set up by `scripts/install.sh` with Python 3.12 on macOS, at the versions
+the script pins. The notebooks are not regularly tested afterwards. To
+report a problem or ask a question, open an
+[issue](https://github.com/Caltech-IPAC/euclid-forced-photometry/issues).
+
+The code and text were developed with the assistance of AI tools
+(Anthropic's Claude) and reviewed by the authors. The fitting engine is
+The Tractor, and the data come from IRSA, the Euclid Consortium, unWISE,
+the Cosmic Dawn Survey and SDSS, cited in the references above.

@@ -167,8 +167,9 @@ def show_fit_cutouts(fit, vis_cutout, *, size_arcsec=20.0, n_sources=3,
     """Show aligned VIS and ground cutouts in µJy/arcsec².
 
     ``vmin`` and ``vmax`` set the common VIS/science/model limits; omitted
-    limits are chosen separately for each source. Residuals use ±20% of the
-    positive display limit. Explicit ``object_ids`` include edge sources.
+    limits are chosen separately for each source. Residuals are shown on
+    ±5 times the median pixel noise of the image, whatever the source.
+    Explicit ``object_ids`` include edge sources.
     """
     if vmax is not None and (not np.isfinite(vmax) or vmax <= 0):
         raise ValueError("vmax must be positive and finite")
@@ -180,6 +181,9 @@ def show_fit_cutouts(fit, vis_cutout, *, size_arcsec=20.0, n_sources=3,
     image = fit.image
     scale = pixel_scale_arcsec(image.wcs)
     area = pixel_area_arcsec2(image.wcs)
+    valid = image.invvar_ujy > 0
+    # Residuals on ±5 sigma of the pixel noise, so a bright neighbour does not set the scale.
+    resid_lim = 5.0 / np.sqrt(np.median(image.invvar_ujy[valid])) / area if valid.any() else 1.0
     vis_aligned = _vis_on_ground(vis_cutout, image)
     vis_aligned -= np.nanmedian(vis_aligned)
     half = max(4, int(np.ceil(size_arcsec / (2 * scale))))
@@ -237,7 +241,7 @@ def show_fit_cutouts(fit, vis_cutout, *, size_arcsec=20.0, n_sources=3,
         panels = ((cutout(vis_aligned, xi, yi), "VIS data", lo, hi),
                   (ground, f"{band} data", lo, hi),
                   (model, f"{band} model (VIS shapes)", lo, hi),
-                  (resid, f"{band} residual", -.2*hi, .2*hi))
+                  (resid, f"{band} residual", -resid_lim, resid_lim))
         for ax, (data, title, lo, hi) in zip(row, panels):
             artist = ax.imshow(data, origin="lower", cmap="RdBu_r" if title.endswith("residual") else "gray",
                                vmin=lo, vmax=hi, extent=extent)

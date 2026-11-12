@@ -16,22 +16,34 @@
 #                         only needed for the unWISE W1/W2 leg, with fitsio and
 #                         setuptools<81 alongside it.
 #
+# Versions are pinned to a set known to work: PyPI packages through
+# scripts/constraints.txt, the three GitHub packages to the commits set
+# below. --unpinned takes the latest of each instead.
+#
 # Safe to re-run: every step checks whether it is already done.
 #
 # Usage:
 #   ./scripts/install.sh            # VIS + NISP
 #   ./scripts/install.sh --wise     # also the optional unWISE W1/W2 leg
 #   ./scripts/install.sh --python /path/to/python   # install into a given env
+#   ./scripts/install.sh --unpinned # latest versions instead of the pinned ones
 #   ./scripts/install.sh --help
 #
 set -euo pipefail
 
 WANT_WISE=0
 PY_OVERRIDE=""
+PINNED=1
+
+# Commits known to work with scripts/constraints.txt (last checked 2026-11-08).
+TRACTOR_COMMIT=3fd2e80eafb9cc092e203ba50a95557eb8543878      # 2026-04-22, Tractor 11.1
+ASTROMETRY_COMMIT=42b12ec1d50cbfd7fe90f9e645e84643bf018029   # 2026-10-11
+UNWISE_PSF_COMMIT=43d17fc66784f1fce741f46c36f3780a2a5736f5   # 2026-03-07
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --wise) WANT_WISE=1; shift ;;
+        --unpinned) PINNED=0; shift ;;
         --python) PY_OVERRIDE="${2:-}"; shift 2 ;;
         -h|--help)
             awk 'NR>1 && /^#/{sub(/^# ?/,""); print; next} NR>1{exit}' "$0"
@@ -55,6 +67,12 @@ if [[ ! -f "$REPO_ROOT/pyproject.toml" ]]; then
 fi
 cd "$REPO_ROOT"
 
+# pip constraints: the exact PyPI versions in scripts/constraints.txt (unless --unpinned).
+PIP_C=()
+if [[ "$PINNED" -eq 1 ]]; then
+    PIP_C=(-c "$REPO_ROOT/scripts/constraints.txt")
+fi
+
 # --- Pick the Python interpreter to install into -----------------------------
 # Priority: explicit --python > active venv > active conda env > a fresh .venv.
 if [[ -n "$PY_OVERRIDE" ]]; then
@@ -67,7 +85,7 @@ elif [[ -n "${CONDA_PREFIX:-}" ]]; then
     PY="$CONDA_PREFIX/bin/python"
     log "Using the active conda env: ${CONDA_DEFAULT_ENV:-$CONDA_PREFIX}"
     if [[ "${CONDA_DEFAULT_ENV:-}" == "base" ]]; then
-        echo "  note: installing into conda 'base'. Consider 'conda create -n euclid python=3.11' first."
+        echo "  note: installing into conda 'base'. Consider 'conda create -n euclid python=3.12' first."
     fi
 else
     if [[ ! -d "$REPO_ROOT/.venv" ]]; then
@@ -84,8 +102,13 @@ fi
 "$PY" -c 'import sys; print("    python", sys.version.split()[0], "->", sys.executable)'
 if ! "$PY" -c 'import sys; sys.exit(0 if sys.version_info[:2] >= (3, 10) else 1)'; then
     echo "euclid_phot needs Python >= 3.10, but the selected interpreter is $("$PY" -V 2>&1)." >&2
-    echo "Create a newer environment first, e.g.:  conda create -n euclid python=3.11" >&2
+    echo "Create a newer environment first, e.g.:  conda create -n euclid python=3.12" >&2
     echo "then re-run, or pass --python /path/to/a/3.10+/python." >&2
+    exit 1
+fi
+if [[ "$PINNED" -eq 1 ]] && ! "$PY" -c 'import sys; sys.exit(0 if sys.version_info[:2] >= (3, 11) else 1)'; then
+    echo "The pinned versions in scripts/constraints.txt need Python >= 3.11 (selected: $("$PY" -V 2>&1))." >&2
+    echo "Create a newer environment (conda create -n euclid python=3.12) or pass --unpinned." >&2
     exit 1
 fi
 
@@ -115,6 +138,29 @@ exclude_pycache() {
         || echo "__pycache__/" >> "$exclude"
 }
 
+# Shallow clone of one commit ($3) when pinned, of the branch head otherwise.
+clone_at() {
+    local url="$1" dir="$2" sha="$3"
+    if [[ "$PINNED" -eq 1 ]]; then
+        git init -q "$dir"
+        git -C "$dir" remote add origin "$url"
+        git -C "$dir" fetch -q --depth 1 origin "$sha"
+        git -C "$dir" checkout -q --detach FETCH_HEAD
+    else
+        git clone --depth 1 "$url" "$dir"
+    fi
+}
+
+# Note when an existing clone is not at the pinned commit; delete it to re-clone.
+check_pin() {
+    local dir="$1" sha="$2" head
+    [[ "$PINNED" -eq 1 && -d "$dir/.git" ]] || return 0
+    head="$(git -C "$dir" rev-parse HEAD 2>/dev/null || true)"
+    if [[ -n "$head" && "$head" != "$sha" ]]; then
+        echo "    note: $dir is at ${head:0:12}, not the pinned ${sha:0:12}; delete it and re-run to re-clone"
+    fi
+}
+
 # Tractor's build runs SWIG to generate its C-extension wrappers (the
 # _mp_fourier FFT module). SWIG is a build tool, not a pip dependency of
 # Tractor, so ensure it is present before the build. The official `swig`
@@ -126,7 +172,7 @@ ensure_swig() {
     fi
     log "SWIG (needed to build Tractor) was not found; installing it"
     # 1. Universal path: the `swig` wheel drops a binary in the env's bin dir.
-    if "$PY" -m pip install swig >/dev/null 2>&1; then
+    if "$PY" -m pip install ${PIP_C[@]+"${PIP_C[@]}"} swig >/dev/null 2>&1; then
         local scripts_dir
         scripts_dir="$("$PY" -c "import sysconfig; print(sysconfig.get_path('scripts'))")"
         export PATH="$scripts_dir:$PATH"   # so the Tractor build sees it
@@ -162,7 +208,7 @@ EOF
 
 # --- 1. The package + its PyPI dependencies (incl. numpy, jupyter) -----------
 log "Installing euclid_phot and its PyPI dependencies"
-"$PY" -m pip install -e ".[dev]"
+"$PY" -m pip install ${PIP_C[@]+"${PIP_C[@]}"} -e ".[dev]"
 
 # --- 2. Tractor (needs cython, then --no-build-isolation) --------------------
 if has_module tractor; then
@@ -173,16 +219,19 @@ else
     # --no-build-isolation uses the env's own build backend, so setuptools and
     # wheel must be present (Python 3.12+ venvs no longer ship setuptools).
     # cython + numpy (a euclid_phot dep, already installed) build _mp_fourier.
-    "$PY" -m pip install setuptools wheel cython
+    "$PY" -m pip install ${PIP_C[@]+"${PIP_C[@]}"} setuptools wheel cython
     # Tractor's SWIG wrapper for _mp_fourier still names two Python 2 C-API
     # functions; recent clang rejects the implicit declarations and the
     # module would fail to load anyway. Map them to their Python 3 names.
     # SWIG >= 4.4 also generates an int-returning module init, in which
     # numpy < 2.3.5's import_array() macro returns NULL; recent clang/gcc
     # treat that as an error, so downgrade it to a warning.
+    TRACTOR_SRC="git+https://github.com/dstndstn/tractor.git"
+    if [[ "$PINNED" -eq 1 ]]; then
+        TRACTOR_SRC="$TRACTOR_SRC@$TRACTOR_COMMIT"
+    fi
     CFLAGS="${CFLAGS:-} -DPyString_Check=PyUnicode_Check -DPyInt_Check=PyLong_Check -Wno-int-conversion" \
-        "$PY" -m pip install --no-build-isolation \
-        "git+https://github.com/dstndstn/tractor.git"
+        "$PY" -m pip install --no-build-isolation "$TRACTOR_SRC"
 fi
 
 # --- 3. astrometry.net pure-Python utilities (source clone on a .pth) --------
@@ -192,9 +241,10 @@ else
     log "Setting up astrometry.net utilities"
     if [[ ! -d "$REPO_ROOT/.anet/astrometry" ]]; then
         mkdir -p "$REPO_ROOT/.anet"
-        git clone --depth 1 https://github.com/dstndstn/astrometry.net.git \
-            "$REPO_ROOT/.anet/astrometry"
+        clone_at https://github.com/dstndstn/astrometry.net.git \
+            "$REPO_ROOT/.anet/astrometry" "$ASTROMETRY_COMMIT"
     fi
+    check_pin "$REPO_ROOT/.anet/astrometry" "$ASTROMETRY_COMMIT"
     exclude_pycache "$REPO_ROOT/.anet/astrometry"
     write_pth astrometry_net.pth "$REPO_ROOT/.anet"
     has_module astrometry.util.fits \
@@ -205,15 +255,16 @@ fi
 if [[ "$WANT_WISE" -eq 1 ]]; then
     # The top-level unwise_psf package can import without its rendering
     # dependencies. Check the actual implementation after installing them.
-    "$PY" -m pip install fitsio "setuptools<81"
+    "$PY" -m pip install ${PIP_C[@]+"${PIP_C[@]}"} fitsio "setuptools<81"
     if has_module unwise_psf.unwise_psf; then
         log "unwise_psf rendering module already importable"
     else
         log "Setting up the unWISE W1/W2 leg (unwise_psf, fitsio, setuptools<81)"
         if [[ ! -d "$REPO_ROOT/.unwise_psf/py" ]]; then
-            git clone --depth 1 https://github.com/legacysurvey/unwise_psf \
-                "$REPO_ROOT/.unwise_psf"
+            clone_at https://github.com/legacysurvey/unwise_psf \
+                "$REPO_ROOT/.unwise_psf" "$UNWISE_PSF_COMMIT"
         fi
+        check_pin "$REPO_ROOT/.unwise_psf" "$UNWISE_PSF_COMMIT"
         exclude_pycache "$REPO_ROOT/.unwise_psf"
         write_pth unwise_psf.pth "$REPO_ROOT/.unwise_psf/py"
         has_module unwise_psf.unwise_psf \

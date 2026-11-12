@@ -857,9 +857,13 @@ def _fit_prior(run, result, tim_prior, parsed_coords):
         # No reference flux for user coords: a placeholder 1 uJy would
         # reject every source brighter than 100 uJy.
         initial_flux = np.full(len(initial_flux), np.nan)
+    # A supplied position may be empty, so a slightly negative flux is a
+    # measurement there, not a failed fit; only the runaway check applies.
+    reject_negative = parsed_coords is None
     tractor_prior, fit_quality, prior_err_ujy = fit_forced_photometry(
         tim_prior, result.sources, band=prior_band,
-        initial_fluxes_ujy=initial_flux, return_errors=True)
+        initial_fluxes_ujy=initial_flux, reject_negative=reject_negative,
+        return_errors=True)
     if prior["free_shapes"]:
         fit_quality, _ = fit_free_shapes(
             tractor_prior, tim_prior, result.sources, fit_quality,
@@ -873,14 +877,15 @@ def _fit_prior(run, result, tim_prior, parsed_coords):
     if prior["free_shapes"] or prior["refine_positions"]:
         tractor_prior, final_quality, prior_err_ujy = fit_forced_photometry(
             tim_prior, result.sources, band=prior_band,
-            initial_fluxes_ujy=initial_flux, return_errors=True)
+            initial_fluxes_ujy=initial_flux, reject_negative=reject_negative,
+            return_errors=True)
         fit_quality &= final_quality
     result.flux_quality = fit_quality
 
     if persource_psf:
         prior_ujy = fluxes_ujy(result.sources, prior_band)
         with np.errstate(invalid="ignore"):
-            bad = prior_ujy < 0
+            bad = (prior_ujy < 0) if reject_negative else np.zeros(len(prior_ujy), dtype=bool)
             ref_ok = np.isfinite(initial_flux) & (initial_flux > 0)
             bad |= ref_ok & (np.abs(prior_ujy) > 100.0 * initial_flux)
         result.flux_quality = result.flux_quality & ~bad
