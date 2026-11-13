@@ -5,8 +5,12 @@ import numpy as np
 PLOT_BANDS = ('u', 'g', 'r', 'i', 'z', 'y')
 
 
-def show_catalog_comparisons(comparisons):
-    """Keep six fixed band rows; omitted bands leave blank panels."""
+def show_catalog_comparisons(comparisons, *, marker_size=4):
+    """Six fixed band rows with 1-sigma errors; omitted bands stay blank.
+
+    Magnitude-offset errors combine the two flux errors in quadrature,
+    assuming independent measurements.
+    """
     import matplotlib.pyplot as plt
     fig,axes=plt.subplots(6,2,figsize=(10,21),squeeze=False,constrained_layout=True)
     for row,band in enumerate(PLOT_BANDS):
@@ -26,10 +30,20 @@ def show_catalog_comparisons(comparisons):
             data=table[selected]
             if not len(data):continue
             ref=np.asarray(data['reference_flux_ujy'],float);fit=np.asarray(data['forced_flux_ujy'],float)
+            ref_err=np.asarray(data['reference_error_ujy'],float)
+            fit_err=np.asarray(data['forced_error_ujy'],float)
             label=f'{name} (N={len(data)})'
-            axes[row,0].scatter(ref,fit,s=16,label=label,color=color,alpha=alpha)
+            error_style=dict(fmt='none',ecolor=color,alpha=min(alpha,.4),
+                             elinewidth=.5,capsize=0,zorder=2)
+            axes[row,0].scatter(ref,fit,s=marker_size,label=label,color=color,alpha=alpha,zorder=3)
+            axes[row,0].errorbar(ref,fit,xerr=ref_err,yerr=fit_err,**error_style)
             mag=23.9-2.5*np.log10(ref)
-            axes[row,1].scatter(mag,2.5*np.log10(fit/ref),s=16,label=label,color=color,alpha=alpha)
+            mag_error_factor=2.5/np.log(10)
+            mag_err=mag_error_factor*ref_err/ref
+            offset=2.5*np.log10(fit/ref)
+            offset_err=mag_error_factor*np.hypot(fit_err/fit,ref_err/ref)
+            axes[row,1].scatter(mag,offset,s=marker_size,label=label,color=color,alpha=alpha,zorder=3)
+            axes[row,1].errorbar(mag,offset,xerr=mag_err,yerr=offset_err,**error_style)
         ax=axes[row,0]
         ax.set(xscale='log',yscale='log',xlabel='Rubin catalog flux (µJy)',ylabel='Euclid-prior forced flux (µJy)',title=f'{band}: catalog comparison')
         if ax.collections:

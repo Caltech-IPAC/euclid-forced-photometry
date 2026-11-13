@@ -15,6 +15,7 @@ def get_cache_dir(data_access=None):
     package default. Rubin does not use Euclid's DR1 deep_survey subdirectory.
     """
     release = get_data_access() if data_access is None else data_access
-    get_access_settings(release)  # Validate against the supported releases.
+    settings = get_access_settings(release)
+    release = settings.get("data_release", release)
     base = Path(os.environ.get("EUCLID_PHOT_DATA_DIR", DEFAULT_DATA_DIR))
     return base / release.lower() / "rubin"

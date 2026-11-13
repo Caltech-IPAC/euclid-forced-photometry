@@ -17,6 +17,7 @@ from astropy.table import Table
 from ..euclid.catalog import query_mer_catalog
 from ..euclid.cutouts import fetch_cutout
 from ..euclid.psf import extract_grid_psf
+from ..data_access import get_data_dir
 from ..pipeline import run_forced_photometry
 from .image import SmallImage
 
@@ -38,6 +39,8 @@ def prepare_euclid(image: SmallImage, data_dir: str | Path,
     ny, nx = image.science_ujy.shape
     center = image.wcs.pixel_to_world((nx - 1) / 2, (ny - 1) / 2)
     ra, dec = round(center.ra.deg, 4), round(center.dec.deg, 4)
+    if data_dir == get_data_dir():
+        data_dir = get_data_dir(ra=ra, dec=dec)
     if padding_arcsec < 0:
         raise ValueError("padding_arcsec must be nonnegative")
     edge_x = np.linspace(-.5, nx-.5, 5)

@@ -15,17 +15,36 @@
       }
     },
     "DR1": {
-      "catalog_table": "euclid_dr1_mer_catalogue_deep_survey",
-      "morphology_table": null,
-      "image_collection": "euclid_dr1_deep_DpdMerBksMosaic",
-      "cache_subdir": "dr1/deep_survey",
+      "cache_subdir": "dr1",
       "maxrec": 200000,
       "irsa": {
-        "tap_url": "https://irsadev.ipac.caltech.edu/TAP",
-        "sia_url": "https://irsadev.ipac.caltech.edu/SIA",
-        "ssa_url": "https://irsadev.ipac.caltech.edu/SSA",
+        "tap_url": "https://irsa.ipac.caltech.edu/TAP",
+        "sia_url": "https://irsa.ipac.caltech.edu/SIA",
+        "ssa_url": "https://irsa.ipac.caltech.edu/SSA",
         "timeout_seconds": 600
+      },
+      "survey_priority": [
+        "deep",
+        "wide"
+      ],
+      "surveys": {
+        "deep": {
+          "catalog_table": "euclid_dr1_mer_catalogue_deep_survey",
+          "morphology_table": null,
+          "image_collection": "euclid_dr1_deep_DpdMerBksMosaic",
+          "cache_subdir": "dr1/deep_survey"
+        },
+        "wide": {
+          "catalog_table": "euclid_dr1_mer_catalogue_wide_survey",
+          "morphology_table": null,
+          "image_collection": "euclid_dr1_wide_DpdMerBksMosaic",
+          "cache_subdir": "dr1/wide_survey"
+        }
       }
+    },
+    "DR1_WIDE": {
+      "base_release": "DR1",
+      "survey": "wide"
     }
   },
   "public_irsa": {

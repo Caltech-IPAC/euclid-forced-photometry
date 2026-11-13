@@ -95,11 +95,16 @@ def discover_mer_mosaics(ra: float, dec: float, half_size_deg: float,
     from ..netutils import retry
     target = SkyCoord(ra=ra, dec=dec, unit="deg")
     search_radius_deg = MER_TILE_HALF_DEG + half_size_deg + SIA_SEARCH_PAD_DEG
+    settings = get_access_settings(ra=ra, dec=dec)
+    if "survey" in settings:
+        # SIA intersects image footprints, not just tile centers. Cover the
+        # requested square without searching an extra half-tile of DR1 sky.
+        search_radius_deg = np.sqrt(2) * half_size_deg + SIA_SEARCH_PAD_DEG
     client = get_irsa_client()
     sia_results = retry(
         lambda: client.query_sia(
             pos=(target, search_radius_deg * u.deg),
-            collection=get_access_settings()["image_collection"],
+            collection=settings["image_collection"],
         ),
         what="IRSA SIA discovery")
 
@@ -123,7 +128,8 @@ def discover_mer_mosaics(ra: float, dec: float, half_size_deg: float,
             s_ra = s_dec = None
         raw.append(dict(band=band, ptype=ptype, tile_id=tile_id,
                         s3=s3_path, url=url, s_ra=s_ra, s_dec=s_dec,
-                        fname=fname))
+                        fname=fname, survey=settings.get("survey"),
+                        collection=settings["image_collection"]))
 
     cosd = float(np.cos(np.radians(dec)))
     thresh_deg = MER_TILE_HALF_DEG + half_size_deg + 0.005
@@ -281,7 +287,8 @@ def fetch_cutout(band: str, ra: float, dec: float, size_arcsec: float,
                  mosaic_cache_dir: str | Path | None = None,
                  force_download: bool = False,
                  with_rms: bool = True,
-                 with_flag: bool = False) -> Cutout:
+                 with_flag: bool = False,
+                 cache_only: bool = False) -> Cutout:
     """Fetch a single-band cutout, reading the local FITS cache when present
     and otherwise downloading native pixels from S3 (and caching the result).
 
@@ -315,7 +322,14 @@ def fetch_cutout(band: str, ra: float, dec: float, size_arcsec: float,
     -------
     Cutout
     """
-    data_dir = get_data_dir() / "cutouts" if data_dir is None else Path(data_dir)
+    if cache_only and force_download:
+        raise ValueError("cache_only and force_download cannot both be true")
+    if data_dir is None or Path(data_dir) == get_data_dir() / "cutouts":
+        survey = (products.get(band, {}).get("science", {}).get("survey")
+                  if isinstance(products, dict) else None)
+        data_dir = get_data_dir(ra=ra, dec=dec, survey=survey, cache_only=cache_only) / "cutouts"
+    else:
+        data_dir = Path(data_dir)
     sci_cache = _cutout_cache_path(band, ra, dec, size_arcsec, data_dir, "science")
     rms_cache = _cutout_cache_path(band, ra, dec, size_arcsec, data_dir, "rms")
     flag_cache = _cutout_cache_path(band, ra, dec, size_arcsec, data_dir, "flag")
@@ -323,6 +337,9 @@ def fetch_cutout(band: str, ra: float, dec: float, size_arcsec: float,
     have_sci = sci_cache.exists()
     have_rms = rms_cache.exists() if with_rms else True
     have_flag = flag_cache.exists() if with_flag else True
+
+    if cache_only and not (have_sci and have_rms and have_flag):
+        raise FileNotFoundError("cutout cache is incomplete")
 
     if have_sci and have_rms and have_flag and not force_download:
         data, wcs, header = _read_cutout_fits(sci_cache)
@@ -366,6 +383,9 @@ def fetch_cutout(band: str, ra: float, dec: float, size_arcsec: float,
             "No candidate MER tile contains this cutout. Use a smaller field "
             "or separate tile fits; automatic resampling is not performed.")
     tile_id = science_tile["tile_id"]
+    if science_tile.get("survey"):
+        header["MERSURV"] = science_tile["survey"]
+        header["MERCOLL"] = science_tile["collection"]
 
     rms = None
     if with_rms:
