@@ -79,7 +79,8 @@ def extract_catalog_psf(band: str, ra: float, dec: float,
                         tile_id: str | None = None,
                         radius_arcsec: float = 60.0,
                         data_dir: str | Path | None = None,
-                        force_download: bool = False) -> dict:
+                        force_download: bool = False,
+                        cache_only: bool = False) -> dict:
     """Download or load a region's worth of CATALOG-PSF stamps.
 
     Parameters
@@ -107,7 +108,14 @@ def extract_catalog_psf(band: str, ra: float, dec: float,
     -------
     dict with keys ``stamps``, ``ra``, ``dec``, ``x``, ``y``, ``fwhm``, ``stmpsize``.
     """
-    data_dir = get_data_dir() / "psf" if data_dir is None else Path(data_dir)
+    if cache_only and force_download:
+        raise ValueError("cache_only and force_download cannot both be true")
+    if data_dir is None or Path(data_dir) == get_data_dir() / "psf":
+        survey = (products.get(band, {}).get("science", {}).get("survey")
+                  if isinstance(products, dict) else None)
+        data_dir = get_data_dir(ra=ra, dec=dec, survey=survey, cache_only=cache_only) / "psf"
+    else:
+        data_dir = Path(data_dir)
     cache = data_dir / (
         f"psf_stamps_{band.lower()}"
         f"_{ra:.4f}_{dec:.4f}"
@@ -116,6 +124,8 @@ def extract_catalog_psf(band: str, ra: float, dec: float,
     if tile_id is None and products is not None:
         tile_id = products.get(band, {}).get("science", {}).get("tile_id")
     cache = _requested_cache(cache, tile_id, s3_path)
+    if cache_only and not cache.exists():
+        raise FileNotFoundError(f"PSF cache is missing: {cache}")
     if cache.exists() and not force_download:
         with np.load(cache) as d:
             return {key: (d[key].item() if d[key].ndim == 0 else d[key])
@@ -238,7 +248,8 @@ def extract_grid_psf(band: str, ra: float, dec: float,
                      tile_id: str | None = None,
                      radius_arcsec: float = 60.0,
                      data_dir: str | Path | None = None,
-                     force_download: bool = False) -> dict:
+                     force_download: bool = False,
+                     cache_only: bool = False) -> dict:
     """Download or load a region's worth of GRID-PSF stamps.
 
     GRID-PSF samples the tile's PSF model on a regular ~12 arcsec grid
@@ -256,7 +267,14 @@ def extract_grid_psf(band: str, ra: float, dec: float,
     ``data_dir/psf_grid_stamps_<band>_<ra>_<dec>_r<radius>_<version>.npz``,
     a prefix distinct from the CATALOG-PSF cache.
     """
-    data_dir = get_data_dir() / "psf" if data_dir is None else Path(data_dir)
+    if cache_only and force_download:
+        raise ValueError("cache_only and force_download cannot both be true")
+    if data_dir is None or Path(data_dir) == get_data_dir() / "psf":
+        survey = (products.get(band, {}).get("science", {}).get("survey")
+                  if isinstance(products, dict) else None)
+        data_dir = get_data_dir(ra=ra, dec=dec, survey=survey, cache_only=cache_only) / "psf"
+    else:
+        data_dir = Path(data_dir)
     cache = data_dir / (
         f"psf_grid_stamps_{band.lower()}"
         f"_{ra:.4f}_{dec:.4f}"
@@ -265,6 +283,8 @@ def extract_grid_psf(band: str, ra: float, dec: float,
     if tile_id is None and products is not None:
         tile_id = products.get(band, {}).get("science", {}).get("tile_id")
     cache = _requested_cache(cache, tile_id, s3_path)
+    if cache_only and not cache.exists():
+        raise FileNotFoundError(f"PSF cache is missing: {cache}")
     if cache.exists() and not force_download:
         with np.load(cache) as d:
             return {key: (d[key].item() if d[key].ndim == 0 else d[key])

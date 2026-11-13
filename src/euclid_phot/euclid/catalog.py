@@ -59,7 +59,7 @@ def query_mer_catalog(ra: float, dec: float, half_size_deg: float, *,
     is joined only from the selected release. Missing point-like probabilities
     follow the same conservative star selection as the Q1 query.
     """
-    settings = get_access_settings()
+    settings = get_access_settings(ra=ra, dec=dec)
     release = get_data_access()
     table = settings["catalog_table"]
     morphology = settings["morphology_table"]
@@ -118,4 +118,6 @@ def query_mer_catalog(ra: float, dec: float, half_size_deg: float, *,
     mer_cat.meta["MERTABLE"] = table
     mer_cat.meta["MERMORPH"] = morphology or "unavailable; masked columns"
     mer_cat.meta["DATAREL"] = release
+    if "survey" in settings:
+        mer_cat.meta["MERSURV"] = settings["survey"]
     return mer_cat

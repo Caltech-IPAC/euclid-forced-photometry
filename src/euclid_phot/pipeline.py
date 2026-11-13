@@ -377,6 +377,14 @@ class ForcedPhotometryResult:
         table = build_catalog(self, **kwargs)
         table.meta['psf_mode'] = self.psf_mode
         table.meta['DATAREL'] = self.release
+        mer_meta = getattr(self.mer_cat, 'meta', {})
+        prior_cutout = (self.cutouts or {}).get((self.prior or {}).get('band', 'VIS'))
+        survey = mer_meta.get('MERSURV') or getattr(prior_cutout, 'header', {}).get('MERSURV')
+        if survey:
+            table.meta['MERSURV'] = survey
+            for key in ('MERTABLE', 'MERMORPH'):
+                if key in mer_meta:
+                    table.meta[key] = mer_meta[key]
         return table
 
     def image_set(self, band: str) -> dict:
@@ -446,6 +454,7 @@ class _Run:
     half_size_deg: object
     verbose: object
     force_download: object
+    cache_only: object
     n_workers: object
     persource_psf: object
     with_flag: object
@@ -502,6 +511,8 @@ def _load_source_list(run, result, user_coords, mer_catalog):
                 print(f"[1/7] MER catalog from cache ({mer_cache.name})")
             result.mer_cat = Table.read(mer_cache)
         else:
+            if run.cache_only:
+                raise FileNotFoundError(f"MER catalog cache is missing: {mer_cache}")
             if verbose:
                 print(f"[1/7] query MER catalog at ({target_ra:.4f}, {target_dec:.4f})")
             result.mer_cat = query_mer_catalog(target_ra, target_dec, half_size_deg)
@@ -559,6 +570,7 @@ def _load_cutouts(run, result, provided, parsed_coords):
             band, target_ra, target_dec, cutout_size_arcsec,
             products=products, data_dir=cutout_dir,
             force_download=force_download,
+            cache_only=run.cache_only,
             # mask_bright_stars needs the FLG plane (STARSIGNAL bit) on the
             # prior band; the NISP FLG planes feed the coadd-fatal bad-bit
             # veto inside build_tractor_image.
@@ -622,7 +634,8 @@ def _load_psfs(run, result, products, parsed_coords):
     def _extract_psf(band):
         kw = dict(products=products, radius_arcsec=psf_radius,
                   tile_id=cutouts[band].header.get("MERTILE"),
-                  data_dir=psf_dir, force_download=force_download)
+                  data_dir=psf_dir, force_download=force_download,
+                  cache_only=run.cache_only)
         try:
             pd = _extractors[chosen_product](band, target_ra, target_dec, **kw)
         except Exception as exc:           # product missing / fetch failed
@@ -1070,6 +1083,7 @@ def run_forced_photometry(
     user_coords=None,
     data_dir: str | Path | None = None,
     force_download: bool = False,
+    cache_only: bool = False,
     verbose: bool = True,
     n_workers: int = 1,
     persource_psf: bool = True,
@@ -1230,6 +1244,8 @@ def run_forced_photometry(
     ForcedPhotometryResult
     """
     prior = _normalize_prior(prior, has_user_coords=user_coords is not None)
+    if cache_only and force_download:
+        raise ValueError("cache_only and force_download cannot both be true")
     target_bands = _normalize_target_bands(target_bands, prior["band"])
     if psf_product not in ("auto", "catalog", "grid"):
         raise ValueError(
@@ -1244,6 +1260,8 @@ def run_forced_photometry(
     flux_col = _MER_FLUX_COL[prior_band]
 
     data_dir = get_data_dir() if data_dir is None else Path(data_dir)
+    if data_dir == get_data_dir():
+        data_dir = get_data_dir(ra=target_ra, dec=target_dec, cache_only=cache_only)
     cutout_dir = data_dir / "cutouts"
     psf_dir = data_dir / "psf"
     wise_dir = data_dir / "wise"
@@ -1257,6 +1275,7 @@ def run_forced_photometry(
         euclid_bands=euclid_bands, data_dir=data_dir, cutout_dir=cutout_dir,
         psf_dir=psf_dir, wise_dir=wise_dir, half_size_deg=half_size_deg,
         verbose=verbose, force_download=force_download, n_workers=n_workers,
+        cache_only=cache_only,
         persource_psf=persource_psf, with_flag=with_flag,
         mask_bright_stars=mask_bright_stars, psf_product=psf_product)
 
